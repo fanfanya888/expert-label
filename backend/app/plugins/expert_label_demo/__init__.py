@@ -1,0 +1,2 @@
+"""Demo plugin package."""
+
