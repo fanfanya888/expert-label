@@ -1,0 +1,161 @@
+:root {
+  color: #182230;
+  background: #f3f6fa;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  background: #f3f6fa;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.app-shell__sider {
+  border-right: 1px solid #e7ecf3;
+  background: #ffffff !important;
+}
+
+.app-shell__brand {
+  padding: 28px 24px 16px;
+}
+
+.app-shell__brand-title.ant-typography {
+  margin-bottom: 2px;
+}
+
+.app-shell__menu {
+  border-inline-end: none !important;
+  padding: 8px 12px;
+}
+
+.app-shell__header {
+  height: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 32px;
+  background: transparent;
+}
+
+.app-shell__page-title.ant-typography {
+  margin: 0;
+}
+
+.app-shell__content {
+  padding: 0 32px 32px;
+}
+
+.panel-card,
+.metric-card {
+  border: 1px solid #e7ecf3;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+}
+
+.metric-card .ant-statistic {
+  margin-bottom: 16px;
+}
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: #eef3f8;
+}
+
+.login-page__panel {
+  width: min(1080px, 100%);
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 24px;
+  align-items: stretch;
+}
+
+.login-page__intro,
+.login-card {
+  border: 1px solid #e1e8f0;
+  border-radius: 24px;
+  background: #ffffff;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.06);
+}
+
+.login-page__intro {
+  padding: 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.eyebrow {
+  letter-spacing: 0.18em;
+  font-size: 12px;
+  color: #1f4b99;
+}
+
+.login-page__title.ant-typography {
+  margin-top: 20px;
+  margin-bottom: 20px;
+  font-size: 40px;
+  line-height: 1.2;
+}
+
+.login-page__desc.ant-typography {
+  max-width: 440px;
+  font-size: 16px;
+  color: #4b5565;
+}
+
+.login-card {
+  padding: 28px;
+}
+
+.login-card .ant-form {
+  margin-top: 24px;
+}
+
+.ant-card .ant-card-head {
+  border-bottom-color: #eef2f7;
+}
+
+@media (max-width: 992px) {
+  .app-shell__header {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 20px 20px 12px;
+  }
+
+  .app-shell__content {
+    padding: 0 20px 20px;
+  }
+
+  .login-page__panel {
+    grid-template-columns: 1fr;
+  }
+
+  .login-page__intro {
+    padding: 32px;
+  }
+
+  .login-page__title.ant-typography {
+    font-size: 32px;
+  }
+}

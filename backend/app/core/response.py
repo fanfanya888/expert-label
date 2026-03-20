@@ -14,3 +14,11 @@ def build_response(
         "data": data,
     }
 
+
+def serialize_schema(data: Any) -> Any:
+    if hasattr(data, "model_dump"):
+        return data.model_dump(mode="json")
+    if isinstance(data, list):
+        return [serialize_schema(item) for item in data]
+    return data
+

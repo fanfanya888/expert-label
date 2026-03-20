@@ -1,0 +1,10 @@
+{
+  "name": "workspace-dev",
+  "private": true,
+  "scripts": {
+    "dev": "docker compose up -d && concurrently -n BACKEND,FRONTEND \"cd backend && alembic upgrade head && uvicorn app.main:app --reload --host 127.0.0.1 --port 8000\" \"cd frontend && npm run dev -- --host 127.0.0.1 --port 5173\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}

@@ -1,57 +1,34 @@
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, status
-from fastapi.responses import JSONResponse
-from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.router import api_router
+from app.api.routes.public import router as public_router
 from app.core.config import get_settings
-from app.core.response import build_response
-from app.db.session import get_db_session
-from app.plugins.registrar import build_plugin_registry
+from app.core.exceptions import register_exception_handlers
+from app.core.logging import setup_logging
 
 settings = get_settings()
-plugin_registry = build_plugin_registry()
-
-app = FastAPI(title=settings.app_name, debug=settings.app_debug)
+setup_logging(settings.app_debug)
 
 
-@app.get("/")
-def read_root() -> dict[str, object]:
-    return build_response(
-        data={
-            "app_name": settings.app_name,
-            "environment": settings.app_env,
-            "plugins": plugin_registry.list_metadata(),
-        }
+def create_app() -> FastAPI:
+    app = FastAPI(title=settings.app_name, debug=settings.app_debug)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
+    register_exception_handlers(app)
+    app.include_router(public_router)
+    app.include_router(api_router, prefix=settings.api_prefix)
 
-@app.get("/health")
-def read_health(db: Session = Depends(get_db_session)) -> JSONResponse:
-    database_status = "connected"
+    return app
 
-    try:
-        db.execute(text("SELECT 1"))
-    except SQLAlchemyError:
-        database_status = "unavailable"
 
-    http_status = (
-        status.HTTP_200_OK
-        if database_status == "connected"
-        else status.HTTP_503_SERVICE_UNAVAILABLE
-    )
-
-    return JSONResponse(
-        status_code=http_status,
-        content=build_response(
-            message="ok" if database_status == "connected" else "database unavailable",
-            data={
-                "status": "healthy" if database_status == "connected" else "degraded",
-                "database": database_status,
-                "plugins": plugin_registry.list_keys(),
-            },
-        ),
-    )
-
+app = create_app()
