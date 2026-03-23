@@ -76,6 +76,46 @@ def validate_submission(
     return build_response(data=plugin.validate_project_submission(db, project_id, payload))
 
 
+@router.post("/projects/{project_id}/rule-ai-review")
+def review_rule_with_ai(
+    project_id: int,
+    payload: dict[str, Any],
+    db: Session = Depends(get_db),
+    plugin: SingleTurnSearchCasePlugin = Depends(get_single_turn_search_case_plugin),
+) -> dict[str, object]:
+    return build_response(data=plugin.review_project_rule_with_ai(db, project_id, payload))
+
+
+@router.post("/projects/{project_id}/rule-definition-ai-review")
+def review_rule_definition_with_ai(
+    project_id: int,
+    payload: dict[str, Any],
+    db: Session = Depends(get_db),
+    plugin: SingleTurnSearchCasePlugin = Depends(get_single_turn_search_case_plugin),
+) -> dict[str, object]:
+    return build_response(data=plugin.review_project_rule_definition_with_ai(db, project_id, payload))
+
+
+@router.post("/projects/{project_id}/model-a-ai-review")
+def review_model_a_with_ai(
+    project_id: int,
+    payload: dict[str, Any],
+    db: Session = Depends(get_db),
+    plugin: SingleTurnSearchCasePlugin = Depends(get_single_turn_search_case_plugin),
+) -> dict[str, object]:
+    return build_response(data=plugin.review_project_model_with_ai(db, project_id, payload, "model_a"))
+
+
+@router.post("/projects/{project_id}/model-b-ai-review")
+def review_model_b_with_ai(
+    project_id: int,
+    payload: dict[str, Any],
+    db: Session = Depends(get_db),
+    plugin: SingleTurnSearchCasePlugin = Depends(get_single_turn_search_case_plugin),
+) -> dict[str, object]:
+    return build_response(data=plugin.review_project_model_with_ai(db, project_id, payload, "model_b"))
+
+
 @router.post("/projects/{project_id}/submissions")
 def create_submission(
     project_id: int,

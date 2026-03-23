@@ -278,6 +278,104 @@ export interface SearchCaseSoftCheck {
   message: string;
 }
 
+export interface SearchCaseAiReviewMissingField {
+  field: string;
+  label: string;
+  message: string;
+}
+
+export interface SearchCaseAiReviewCheckItem {
+  passed: boolean;
+  detail: string;
+}
+
+export interface SearchCaseAiRuleReviewResult {
+  status: "pass" | "risk" | "fail";
+  issues: string[];
+  checks: Record<string, SearchCaseAiReviewCheckItem>;
+  reference_advice: string;
+  extra_suggestions: string[];
+}
+
+export interface SearchCaseAiModelReviewResult {
+  ai_judgement: "yes" | "no" | "uncertain";
+  human_judgement: "yes" | "no";
+  consistency: "consistent" | "inconsistent" | "debatable";
+  remark_quality: "good" | "weak" | "insufficient";
+  reason: string;
+  reference_advice: string;
+  extra_suggestions: string[];
+}
+
+export interface SearchCaseAiReviewSummary {
+  overall_status: "pass" | "risk" | "fail";
+  summary: string;
+}
+
+export interface SingleTurnSearchCaseAiReviewRuleDraft {
+  rule_index: number;
+  rule_category?: string | null;
+  rule_text?: string | null;
+  weight?: number | null;
+  evidence_source_type?: SearchCaseRuleInput["evidence_source_type"] | null;
+  reference_url?: string | null;
+  quote_text?: string | null;
+  evidence_screenshot?: string | null;
+  optional_note?: string | null;
+  model_a_human_hit?: boolean | null;
+  model_a_human_note?: string | null;
+  model_b_human_hit?: boolean | null;
+  model_b_human_note?: string | null;
+}
+
+export interface SingleTurnSearchCaseAiReviewPayload {
+  project_id: number;
+  task_id?: string | null;
+  domain?: string | null;
+  scenario_description?: string | null;
+  prompt?: string | null;
+  timeliness_tag?: string | null;
+  model_a: Partial<SearchCaseModelAnswer>;
+  model_b: Partial<SearchCaseModelAnswer>;
+  rule: SingleTurnSearchCaseAiReviewRuleDraft;
+}
+
+export interface SingleTurnSearchCaseAiReviewResponse {
+  ok: boolean;
+  precheck: {
+    passed: boolean;
+    missing_fields: SearchCaseAiReviewMissingField[];
+  };
+  review_result: SearchCaseAiReviewSummary | null;
+  rule_review: SearchCaseAiRuleReviewResult | null;
+  model_1_review: SearchCaseAiModelReviewResult | null;
+  model_2_review: SearchCaseAiModelReviewResult | null;
+  provider?: string | null;
+  error_message?: string | null;
+}
+
+export interface SingleTurnSearchCaseAiRuleCheckResponse {
+  ok: boolean;
+  precheck: {
+    passed: boolean;
+    missing_fields: SearchCaseAiReviewMissingField[];
+  };
+  result: SearchCaseAiRuleReviewResult | null;
+  provider?: string | null;
+  error_message?: string | null;
+}
+
+export interface SingleTurnSearchCaseAiModelCheckResponse {
+  ok: boolean;
+  precheck: {
+    passed: boolean;
+    missing_fields: SearchCaseAiReviewMissingField[];
+  };
+  result: SearchCaseAiModelReviewResult | null;
+  provider?: string | null;
+  error_message?: string | null;
+}
+
 export interface SearchCaseScoreSummary {
   positive_total_score: number;
   model_a_raw_score: number;

@@ -262,6 +262,151 @@ class SingleTurnSearchCaseValidationResult(BaseModel):
     normalized: SingleTurnSearchCaseSubmission | None = None
 
 
+class SearchCaseAiReviewDraftModelAnswer(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_name: str | None = None
+    response_text: str | None = None
+    share_link: str | None = None
+    screenshot: str | None = None
+
+
+class SearchCaseAiReviewDraftRule(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    rule_index: int = Field(ge=0)
+    rule_category: str | None = None
+    rule_text: str | None = None
+    weight: int | None = None
+    evidence_source_type: str | None = None
+    reference_url: str | None = None
+    quote_text: str | None = None
+    evidence_screenshot: str | None = None
+    optional_note: str | None = None
+    model_a_human_hit: bool | None = None
+    model_a_human_note: str | None = None
+    model_b_human_hit: bool | None = None
+    model_b_human_note: str | None = None
+
+    @field_validator(
+        "rule_category",
+        "rule_text",
+        "reference_url",
+        "quote_text",
+        "evidence_screenshot",
+        "optional_note",
+        "model_a_human_note",
+        "model_b_human_note",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
+class SingleTurnSearchCaseAiReviewRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    project_id: int
+    task_id: str | None = None
+    domain: str | None = None
+    scenario_description: str | None = None
+    prompt: str | None = None
+    timeliness_tag: str | None = None
+    model_a: SearchCaseAiReviewDraftModelAnswer
+    model_b: SearchCaseAiReviewDraftModelAnswer
+    rule: SearchCaseAiReviewDraftRule
+
+    @field_validator("task_id", "domain", "scenario_description", "prompt", "timeliness_tag", mode="before")
+    @classmethod
+    def normalize_root_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
+class SearchCaseAiReviewMissingField(BaseModel):
+    field: str
+    label: str
+    message: str
+
+
+class SearchCaseAiReviewPrecheck(BaseModel):
+    passed: bool
+    missing_fields: list[SearchCaseAiReviewMissingField] = Field(default_factory=list)
+
+
+class SearchCaseAiReviewCheckItem(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    passed: bool
+    detail: str
+
+
+class SearchCaseAiRuleReviewResult(BaseModel):
+    status: Literal["pass", "fail", "risk"]
+    issues: list[str] = Field(default_factory=list)
+    checks: dict[str, SearchCaseAiReviewCheckItem] = Field(default_factory=dict)
+    reference_advice: str
+    extra_suggestions: list[str] = Field(default_factory=list)
+
+
+class SearchCaseAiModelReviewResult(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    ai_judgement: Literal["yes", "no", "uncertain"]
+    human_judgement: Literal["yes", "no"]
+    consistency: Literal["consistent", "inconsistent", "debatable"]
+    remark_quality: Literal["good", "weak", "insufficient"]
+    reason: str
+    reference_advice: str
+    extra_suggestions: list[str] = Field(default_factory=list)
+
+
+class SearchCaseAiReviewSummary(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    overall_status: Literal["pass", "fail", "risk"]
+    summary: str
+
+
+class SingleTurnSearchCaseAiReviewResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    ok: bool
+    precheck: SearchCaseAiReviewPrecheck
+    review_result: SearchCaseAiReviewSummary | None = None
+    rule_review: SearchCaseAiRuleReviewResult | None = None
+    model_1_review: SearchCaseAiModelReviewResult | None = None
+    model_2_review: SearchCaseAiModelReviewResult | None = None
+    provider: str | None = None
+    error_message: str | None = None
+
+
+class SingleTurnSearchCaseAiRuleCheckResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    ok: bool
+    precheck: SearchCaseAiReviewPrecheck
+    result: SearchCaseAiRuleReviewResult | None = None
+    provider: str | None = None
+    error_message: str | None = None
+
+
+class SingleTurnSearchCaseAiModelCheckResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    ok: bool
+    precheck: SearchCaseAiReviewPrecheck
+    result: SearchCaseAiModelReviewResult | None = None
+    provider: str | None = None
+    error_message: str | None = None
+
+
 class SingleTurnSearchCaseSavedSubmission(BaseModel):
     submission_id: int
     project_id: int

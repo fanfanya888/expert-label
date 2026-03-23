@@ -33,15 +33,24 @@ import {
   fetchSingleTurnSearchCaseCurrentTask,
   fetchSingleTurnSearchCaseProjectStats,
   fetchSingleTurnSearchCaseSchema,
+  reviewSingleTurnSearchCaseModelAWithAi,
+  reviewSingleTurnSearchCaseModelBWithAi,
+  reviewSingleTurnSearchCaseRuleDefinitionWithAi,
   submitSingleTurnSearchCaseSubmission,
   validateSingleTurnSearchCaseSubmission,
 } from "../../services/api";
 import type {
+  SearchCaseAiModelReviewResult,
+  SearchCaseAiReviewMissingField,
+  SearchCaseAiRuleReviewResult,
   SearchCaseModelAnswer,
   SearchCaseRuleEvaluation,
   SearchCaseRuleInput,
   SearchCaseSoftCheck,
   SearchCaseScoreSummary,
+  SingleTurnSearchCaseAiModelCheckResponse,
+  SingleTurnSearchCaseAiReviewPayload,
+  SingleTurnSearchCaseAiRuleCheckResponse,
   SingleTurnSearchCaseSchema,
   SingleTurnSearchCaseSubmissionPayload,
   SingleTurnSearchCaseSubmissionResult,
@@ -76,6 +85,12 @@ interface SearchCaseFormValues {
   model_b_screenshot: string;
   reference_answer: string;
   rules: SearchCaseRuleFormItem[];
+}
+
+interface AiReviewState<T> {
+  status: "idle" | "loading" | "done" | "failed";
+  result?: T;
+  errorMessage?: string;
 }
 
 const DEFAULT_SEARCH_CASE_SCHEMA: SingleTurnSearchCaseSchema = {
@@ -263,6 +278,284 @@ function mapFirstValidationError(field: string): string {
   return "请检查提交内容";
 }
 
+function buildRuleAiReviewPayload(
+  values: Partial<SearchCaseFormValues>,
+  currentTask: SingleTurnSearchCaseTaskItem,
+  projectId: number,
+  rule: SearchCaseRuleFormItem,
+  ruleIndex: number,
+): SingleTurnSearchCaseAiReviewPayload {
+  return {
+    project_id: projectId,
+    task_id: currentTask.task_id,
+    domain: values.domain?.trim() || "",
+    scenario_description: values.scenario_description?.trim() || "",
+    prompt: values.prompt?.trim() || "",
+    timeliness_tag: values.timeliness_tag?.trim() || "",
+    model_a: {
+      model_name: currentTask.model_a_name,
+      response_text: values.model_a_response_text?.trim() || "",
+      share_link: values.model_a_share_link?.trim() || "",
+      screenshot: values.model_a_screenshot?.trim() || "",
+    },
+    model_b: {
+      model_name: currentTask.model_b_name,
+      response_text: values.model_b_response_text?.trim() || "",
+      share_link: values.model_b_share_link?.trim() || "",
+      screenshot: values.model_b_screenshot?.trim() || "",
+    },
+    rule: {
+      rule_index: ruleIndex,
+      rule_category: rule.rule_category?.trim() || "",
+      rule_text: rule.rule_text?.trim() || "",
+      weight: typeof rule.weight === "number" ? rule.weight : null,
+      evidence_source_type: rule.evidence_source_type,
+      reference_url: rule.reference_url?.trim() || "",
+      quote_text: rule.quote_text?.trim() || "",
+      evidence_screenshot: rule.evidence_screenshot?.trim() || "",
+      optional_note: rule.optional_note?.trim() || "",
+      model_a_human_hit: typeof rule.model_a_hit === "boolean" ? rule.model_a_hit : null,
+      model_a_human_note: rule.model_a_note?.trim() || "",
+      model_b_human_hit: typeof rule.model_b_hit === "boolean" ? rule.model_b_hit : null,
+      model_b_human_note: rule.model_b_note?.trim() || "",
+    },
+  };
+}
+
+function runRuleAiPrecheck(payload: SingleTurnSearchCaseAiReviewPayload): SearchCaseAiReviewMissingField[] {
+  const missing: SearchCaseAiReviewMissingField[] = [];
+  const ruleIndex = payload.rule.rule_index;
+
+  const addMissing = (field: string, label: string, message = "请先补全当前规则所需内容后再进行模型校验") => {
+    missing.push({ field, label, message });
+  };
+
+  if (!payload.domain) addMissing("domain", "题目领域");
+  if (!payload.timeliness_tag) addMissing("timeliness_tag", "时效性标签");
+  if (!payload.scenario_description) addMissing("scenario_description", "场景说明");
+  if (!payload.prompt) addMissing("prompt", "Prompt");
+  if (!payload.model_a.response_text) addMissing("model_a.response_text", "模型1回答全文");
+  if (!payload.model_b.response_text) addMissing("model_b.response_text", "模型2回答全文");
+  if (!payload.rule.rule_category) addMissing(`rules.${ruleIndex}.rule_category`, "规则分类");
+  if (payload.rule.weight === null || payload.rule.weight === undefined) addMissing(`rules.${ruleIndex}.weight`, "权重");
+  if (!payload.rule.evidence_source_type) addMissing(`rules.${ruleIndex}.evidence_source_type`, "证据来源");
+  if (!payload.rule.rule_text) addMissing(`rules.${ruleIndex}.rule_text`, "规则内容");
+
+  if (payload.rule.evidence_source_type === "web_link") {
+    if (!payload.rule.reference_url) addMissing(`rules.${ruleIndex}.reference_url`, "参考链接", "网页链接规则必须填写参考链接");
+    if (!payload.rule.quote_text) addMissing(`rules.${ruleIndex}.quote_text`, "引用说明", "网页链接规则必须填写引用说明");
+    if (!payload.rule.evidence_screenshot) addMissing(`rules.${ruleIndex}.evidence_screenshot`, "证据截图", "网页链接规则必须上传证据截图");
+  } else if (
+    payload.rule.evidence_source_type === "prompt_requirement" ||
+    payload.rule.evidence_source_type === "project_document"
+  ) {
+    if (!payload.rule.quote_text && !payload.rule.optional_note) {
+      addMissing(`rules.${ruleIndex}.quote_text`, "引用说明/补充说明", "请至少填写引用说明或补充说明，以说明当前规则依据");
+    }
+  } else if (payload.rule.evidence_source_type === "none") {
+    if (!payload.rule.quote_text && !payload.rule.optional_note) {
+      addMissing(`rules.${ruleIndex}.quote_text`, "引用说明/补充说明", "证据来源为无时，请补充说明为什么该规则成立");
+    }
+  }
+
+  if (payload.rule.model_a_human_hit === null || payload.rule.model_a_human_hit === undefined) {
+    addMissing(`rules.${ruleIndex}.model_a_hit`, "模型1人工判定");
+  }
+  if (!payload.rule.model_a_human_note) addMissing(`rules.${ruleIndex}.model_a_note`, "模型1人工备注");
+  if (payload.rule.model_b_human_hit === null || payload.rule.model_b_human_hit === undefined) {
+    addMissing(`rules.${ruleIndex}.model_b_hit`, "模型2人工判定");
+  }
+  if (!payload.rule.model_b_human_note) addMissing(`rules.${ruleIndex}.model_b_note`, "模型2人工备注");
+
+  return missing;
+}
+
+function getRuleAiStatusTag(state?: AiReviewState<any>) {
+  if (!state || state.status === "idle") {
+    return <Tag>未校验</Tag>;
+  }
+  if (state.status === "loading") {
+    return <Tag color="processing">校验中</Tag>;
+  }
+  if (state.status === "done") {
+    return <Tag color="success">已完成</Tag>;
+  }
+  return <Tag color="error">校验失败</Tag>;
+}
+
+function runRuleDefinitionPrecheck(payload: SingleTurnSearchCaseAiReviewPayload): SearchCaseAiReviewMissingField[] {
+  const missing: SearchCaseAiReviewMissingField[] = [];
+  const ruleIndex = payload.rule.rule_index;
+
+  const addMissing = (field: string, label: string, message = "请先补全当前规则所需内容后再进行模型校验") => {
+    missing.push({ field, label, message });
+  };
+
+  if (!payload.domain) addMissing("domain", "题目领域");
+  if (!payload.timeliness_tag) addMissing("timeliness_tag", "时效性标签");
+  if (!payload.scenario_description) addMissing("scenario_description", "场景说明");
+  if (!payload.prompt) addMissing("prompt", "Prompt");
+  if (!payload.rule.rule_category) addMissing(`rules.${ruleIndex}.rule_category`, "规则分类");
+  if (payload.rule.weight === null || payload.rule.weight === undefined) addMissing(`rules.${ruleIndex}.weight`, "权重");
+  if (!payload.rule.evidence_source_type) addMissing(`rules.${ruleIndex}.evidence_source_type`, "证据来源");
+  if (!payload.rule.rule_text) addMissing(`rules.${ruleIndex}.rule_text`, "规则内容");
+
+  if (payload.rule.evidence_source_type === "web_link") {
+    if (!payload.rule.reference_url) addMissing(`rules.${ruleIndex}.reference_url`, "参考链接", "网页链接规则必须填写参考链接");
+    if (!payload.rule.quote_text) addMissing(`rules.${ruleIndex}.quote_text`, "引用说明", "网页链接规则必须填写引用说明");
+    if (!payload.rule.evidence_screenshot) addMissing(`rules.${ruleIndex}.evidence_screenshot`, "证据截图", "网页链接规则必须上传证据截图");
+  } else if (
+    payload.rule.evidence_source_type === "prompt_requirement" ||
+    payload.rule.evidence_source_type === "project_document"
+  ) {
+    if (!payload.rule.quote_text && !payload.rule.optional_note) {
+      addMissing(`rules.${ruleIndex}.quote_text`, "引用说明/补充说明", "请至少填写引用说明或补充说明，以说明当前规则依据");
+    }
+  } else if (payload.rule.evidence_source_type === "none") {
+    if (!payload.rule.quote_text && !payload.rule.optional_note) {
+      addMissing(`rules.${ruleIndex}.quote_text`, "引用说明/补充说明", "证据来源为无时，请补充说明为什么该规则成立");
+    }
+  }
+
+  return missing;
+}
+
+function runModelReviewPrecheck(
+  payload: SingleTurnSearchCaseAiReviewPayload,
+  targetModel: "model_a" | "model_b",
+): SearchCaseAiReviewMissingField[] {
+  const missing = runRuleDefinitionPrecheck(payload);
+  const ruleIndex = payload.rule.rule_index;
+
+  const addMissing = (field: string, label: string, message = "请先补全当前规则所需内容后再进行模型校验") => {
+    missing.push({ field, label, message });
+  };
+
+  if (targetModel === "model_a") {
+    if (!payload.model_a.response_text) addMissing("model_a.response_text", "模型1回答全文");
+    if (payload.rule.model_a_human_hit === null || payload.rule.model_a_human_hit === undefined) {
+      addMissing(`rules.${ruleIndex}.model_a_hit`, "模型1人工判定");
+    }
+    if (!payload.rule.model_a_human_note) addMissing(`rules.${ruleIndex}.model_a_note`, "模型1人工备注");
+  } else {
+    if (!payload.model_b.response_text) addMissing("model_b.response_text", "模型2回答全文");
+    if (payload.rule.model_b_human_hit === null || payload.rule.model_b_human_hit === undefined) {
+      addMissing(`rules.${ruleIndex}.model_b_hit`, "模型2人工判定");
+    }
+    if (!payload.rule.model_b_human_note) addMissing(`rules.${ruleIndex}.model_b_note`, "模型2人工备注");
+  }
+
+  return missing;
+}
+
+function getAiStatusTag(state?: AiReviewState<unknown>) {
+  if (!state || state.status === "idle") {
+    return <Tag>未校验</Tag>;
+  }
+  if (state.status === "loading") {
+    return <Tag color="processing">校验中</Tag>;
+  }
+  if (state.status === "done") {
+    return <Tag color="success">已完成</Tag>;
+  }
+  return <Tag color="error">校验失败</Tag>;
+}
+
+function renderPrecheckAlert(missingFields: SearchCaseAiReviewMissingField[], passed: boolean) {
+  return (
+    <Alert
+      type={passed ? "success" : "warning"}
+      showIcon
+      message={passed ? "完整性检查已通过" : "完整性检查未通过"}
+      description={
+        passed ? (
+          "当前所需字段已补齐，可以基于现有人工填写内容进行 AI 复核。"
+        ) : (
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {missingFields.map((item) => (
+              <li key={item.field}>{`${item.label}：${item.message}`}</li>
+            ))}
+          </ul>
+        )
+      }
+    />
+  );
+}
+
+function renderRuleCheckResult(result?: SingleTurnSearchCaseAiRuleCheckResponse, errorMessage?: string) {
+  if (!result && !errorMessage) {
+    return null;
+  }
+
+  return (
+    <Card size="small" style={{ marginTop: 16, background: "#fafcff" }} title="AI 规则复核结果">
+      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+        {result ? renderPrecheckAlert(result.precheck.missing_fields, result.precheck.passed) : null}
+        {errorMessage ? <Alert type="error" showIcon message="AI 复核失败" description={errorMessage} /> : null}
+        {result?.result ? (
+          <Card size="small" title="规则复核结果">
+            <Space direction="vertical" size={8} style={{ width: "100%" }}>
+              <Tag color={result.result.status === "pass" ? "success" : result.result.status === "risk" ? "warning" : "error"}>
+                {`状态：${result.result.status}`}
+              </Tag>
+              {result.result.issues.length ? (
+                <Typography.Text type="secondary">{`问题标签：${result.result.issues.join(" / ")}`}</Typography.Text>
+              ) : null}
+              {Object.entries(result.result.checks as Record<string, { passed: boolean; detail: string }>).map(([key, item]) => (
+                <Alert key={key} type={item.passed ? "success" : "warning"} showIcon message={key} description={item.detail} />
+              ))}
+              <Typography.Paragraph style={{ marginBottom: 0 }}>{result.result.reference_advice}</Typography.Paragraph>
+              {result.result.extra_suggestions.length ? (
+                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                  {result.result.extra_suggestions.map((item: string) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </Space>
+          </Card>
+        ) : null}
+      </Space>
+    </Card>
+  );
+}
+
+function renderModelCheckResult(
+  title: string,
+  result?: SingleTurnSearchCaseAiModelCheckResponse,
+  errorMessage?: string,
+) {
+  if (!result && !errorMessage) {
+    return null;
+  }
+
+  return (
+    <Card size="small" style={{ marginTop: 16, background: "#fafcff" }} title={title}>
+      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+        {result ? renderPrecheckAlert(result.precheck.missing_fields, result.precheck.passed) : null}
+        {errorMessage ? <Alert type="error" showIcon message="AI 复核失败" description={errorMessage} /> : null}
+        {result?.result ? (
+          <Space direction="vertical" size={8} style={{ width: "100%" }}>
+            <Tag color={result.result.consistency === "consistent" ? "success" : "warning"}>
+              {`AI判断 ${result.result.ai_judgement} / 与人工 ${result.result.consistency}`}
+            </Tag>
+            <Typography.Text>{`人工备注质量：${result.result.remark_quality}`}</Typography.Text>
+            <Typography.Paragraph style={{ marginBottom: 0 }}>{result.result.reason}</Typography.Paragraph>
+            <Typography.Paragraph style={{ marginBottom: 0 }}>{result.result.reference_advice}</Typography.Paragraph>
+            {result.result.extra_suggestions.length ? (
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {result.result.extra_suggestions.map((item: string) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            ) : null}
+          </Space>
+        ) : null}
+      </Space>
+    </Card>
+  );
+}
+
 export function SingleTurnSearchCasePage() {
   const { projectId } = useParams<{ projectId: string }>();
   const projectIdNumber = useMemo(() => Number(projectId), [projectId]);
@@ -274,6 +567,10 @@ export function SingleTurnSearchCasePage() {
   const [submitting, setSubmitting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [lastSubmission, setLastSubmission] = useState<SingleTurnSearchCaseSubmissionResult | null>(null);
+  const [ruleDefinitionReviews, setRuleDefinitionReviews] = useState<Record<number, AiReviewState<SingleTurnSearchCaseAiRuleCheckResponse>>>({});
+  const [modelAReviews, setModelAReviews] = useState<Record<number, AiReviewState<SingleTurnSearchCaseAiModelCheckResponse>>>({});
+  const [modelBReviews, setModelBReviews] = useState<Record<number, AiReviewState<SingleTurnSearchCaseAiModelCheckResponse>>>({});
+  const ruleAiReviews: Record<number, AiReviewState<any>> = {};
   const requestIdRef = useRef(0);
 
   const watchedRules = Form.useWatch("rules", form);
@@ -288,6 +585,9 @@ export function SingleTurnSearchCasePage() {
     setCurrentTask(null);
     setLoadError(null);
     setLastSubmission(null);
+    setRuleDefinitionReviews({});
+    setModelAReviews({});
+    setModelBReviews({});
     form.resetFields();
   };
 
@@ -359,6 +659,170 @@ export function SingleTurnSearchCasePage() {
       requestIdRef.current += 1;
     };
   }, [projectIdNumber]);
+
+  const handleRuleDefinitionReview = async (ruleIndex: number) => {
+    if (!currentTask || Number.isNaN(projectIdNumber) || projectIdNumber <= 0) {
+      message.error("当前没有可校验的规则");
+      return;
+    }
+
+    const values = (form.getFieldsValue(true) ?? {}) as Partial<SearchCaseFormValues>;
+    const currentRules = Array.isArray(values.rules) ? values.rules : [];
+    const currentRule = currentRules[ruleIndex];
+    if (!currentRule) {
+      message.error("当前规则不存在");
+      return;
+    }
+
+    const payload = buildRuleAiReviewPayload(values, currentTask, projectIdNumber, currentRule, ruleIndex);
+    const precheckMissing = runRuleDefinitionPrecheck(payload);
+    if (precheckMissing.length > 0) {
+      setRuleDefinitionReviews((previous) => ({
+        ...previous,
+        [ruleIndex]: {
+          status: "failed",
+          result: {
+            ok: true,
+            precheck: {
+              passed: false,
+              missing_fields: precheckMissing,
+            },
+            result: null,
+          },
+        },
+      }));
+      message.warning("请先补全当前规则所需内容后再进行模型校验");
+      return;
+    }
+
+    setRuleDefinitionReviews((previous) => ({
+      ...previous,
+      [ruleIndex]: {
+        ...previous[ruleIndex],
+        status: "loading",
+        errorMessage: undefined,
+      },
+    }));
+
+    try {
+      const result = await reviewSingleTurnSearchCaseRuleDefinitionWithAi(projectIdNumber, payload);
+      setRuleDefinitionReviews((previous) => ({
+        ...previous,
+        [ruleIndex]: {
+          status: result.ok ? "done" : "failed",
+          result,
+          errorMessage: result.error_message || undefined,
+        },
+      }));
+      if (!result.ok && result.error_message) {
+        message.error(result.error_message);
+        return;
+      }
+      if (!result.precheck.passed) {
+        message.warning("请先补全当前规则所需内容后再进行模型校验");
+        return;
+      }
+      message.success("规则 AI 复核已完成");
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "规则 AI 复核失败";
+      setRuleDefinitionReviews((previous) => ({
+        ...previous,
+        [ruleIndex]: {
+          ...previous[ruleIndex],
+          status: "failed",
+          errorMessage,
+        },
+      }));
+      message.error(errorMessage);
+    }
+  };
+
+  const handleModelReview = async (ruleIndex: number, targetModel: "model_a" | "model_b") => {
+    if (!currentTask || Number.isNaN(projectIdNumber) || projectIdNumber <= 0) {
+      message.error("当前没有可校验的规则");
+      return;
+    }
+
+    const values = (form.getFieldsValue(true) ?? {}) as Partial<SearchCaseFormValues>;
+    const currentRules = Array.isArray(values.rules) ? values.rules : [];
+    const currentRule = currentRules[ruleIndex];
+    if (!currentRule) {
+      message.error("当前规则不存在");
+      return;
+    }
+
+    const payload = buildRuleAiReviewPayload(values, currentTask, projectIdNumber, currentRule, ruleIndex);
+    const precheckMissing = runModelReviewPrecheck(payload, targetModel);
+    const setReviewState = targetModel === "model_a" ? setModelAReviews : setModelBReviews;
+    const reviewLabel = targetModel === "model_a" ? "模型1" : "模型2";
+
+    if (precheckMissing.length > 0) {
+      setReviewState((previous) => ({
+        ...previous,
+        [ruleIndex]: {
+          status: "failed",
+          result: {
+            ok: true,
+            precheck: {
+              passed: false,
+              missing_fields: precheckMissing,
+            },
+            result: null,
+          },
+        },
+      }));
+      message.warning("请先补全当前规则所需内容后再进行模型校验");
+      return;
+    }
+
+    setReviewState((previous) => ({
+      ...previous,
+      [ruleIndex]: {
+        ...previous[ruleIndex],
+        status: "loading",
+        errorMessage: undefined,
+      },
+    }));
+
+    try {
+      const result =
+        targetModel === "model_a"
+          ? await reviewSingleTurnSearchCaseModelAWithAi(projectIdNumber, payload)
+          : await reviewSingleTurnSearchCaseModelBWithAi(projectIdNumber, payload);
+      setReviewState((previous) => ({
+        ...previous,
+        [ruleIndex]: {
+          status: result.ok ? "done" : "failed",
+          result,
+          errorMessage: result.error_message || undefined,
+        },
+      }));
+      if (!result.ok && result.error_message) {
+        message.error(result.error_message);
+        return;
+      }
+      if (!result.precheck.passed) {
+        message.warning("请先补全当前规则所需内容后再进行模型校验");
+        return;
+      }
+      message.success(`${reviewLabel} AI 复核已完成`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : `${reviewLabel} AI 复核失败`;
+      setReviewState((previous) => ({
+        ...previous,
+        [ruleIndex]: {
+          ...previous[ruleIndex],
+          status: "failed",
+          errorMessage,
+        },
+      }));
+      message.error(errorMessage);
+    }
+  };
+
+  const handleRuleAiReview = async (ruleIndex: number) => {
+    await handleRuleDefinitionReview(ruleIndex);
+  };
 
   const handleSubmit = async (values: SearchCaseFormValues) => {
     if (!currentTask || Number.isNaN(projectIdNumber) || projectIdNumber <= 0) {
@@ -606,6 +1070,12 @@ export function SingleTurnSearchCasePage() {
                               ) : null
                             }
                           >
+                            <Space align="center" size={8} style={{ marginBottom: 16 }}>
+                              {getAiStatusTag(ruleDefinitionReviews[index])}
+                              <Button size="small" onClick={() => void handleRuleDefinitionReview(index)}>
+                                规则校验
+                              </Button>
+                            </Space>
                             <Row gutter={16}>
                               <Col xs={24} md={8}>
                                 <Form.Item
@@ -678,9 +1148,24 @@ export function SingleTurnSearchCasePage() {
                                 </Form.Item>
                               </Col>
                             </Row>
+                            {renderRuleCheckResult(
+                              ruleDefinitionReviews[index]?.result,
+                              ruleDefinitionReviews[index]?.errorMessage,
+                            )}
                             <Row gutter={[16, 16]}>
                               <Col xs={24} xl={12}>
-                                <Card size="small" title={`${currentTask.model_a_name} 评分`}>
+                                <Card
+                                  size="small"
+                                  title={`${currentTask.model_a_name} 评分`}
+                                  extra={
+                                    <Space size={8}>
+                                      {getAiStatusTag(modelAReviews[index])}
+                                      <Button size="small" onClick={() => void handleModelReview(index, "model_a")}>
+                                        模型1校验
+                                      </Button>
+                                    </Space>
+                                  }
+                                >
                                   <Form.Item
                                     label="是否命中"
                                     name={[field.name, "model_a_hit"]}
@@ -700,10 +1185,26 @@ export function SingleTurnSearchCasePage() {
                                   >
                                     <Input.TextArea rows={3} />
                                   </Form.Item>
+                                  {renderModelCheckResult(
+                                    `${currentTask.model_a_name} AI 复核结果`,
+                                    modelAReviews[index]?.result,
+                                    modelAReviews[index]?.errorMessage,
+                                  )}
                                 </Card>
                               </Col>
                               <Col xs={24} xl={12}>
-                                <Card size="small" title={`${currentTask.model_b_name} 评分`}>
+                                <Card
+                                  size="small"
+                                  title={`${currentTask.model_b_name} 评分`}
+                                  extra={
+                                    <Space size={8}>
+                                      {getAiStatusTag(modelBReviews[index])}
+                                      <Button size="small" onClick={() => void handleModelReview(index, "model_b")}>
+                                        模型2校验
+                                      </Button>
+                                    </Space>
+                                  }
+                                >
                                   <Form.Item
                                     label="是否命中"
                                     name={[field.name, "model_b_hit"]}
@@ -723,9 +1224,136 @@ export function SingleTurnSearchCasePage() {
                                   >
                                     <Input.TextArea rows={3} />
                                   </Form.Item>
+                                  {renderModelCheckResult(
+                                    `${currentTask.model_b_name} AI 复核结果`,
+                                    modelBReviews[index]?.result,
+                                    modelBReviews[index]?.errorMessage,
+                                  )}
                                 </Card>
                               </Col>
                             </Row>
+                            {ruleAiReviews[index]?.result ? (
+                              <Card size="small" style={{ marginTop: 16, background: "#fafcff" }} title="AI复核结果">
+                                <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                                  <Alert
+                                    type={ruleAiReviews[index]?.result?.precheck.passed ? "success" : "warning"}
+                                    showIcon
+                                    message={ruleAiReviews[index]?.result?.precheck.passed ? "完整性检查已通过" : "完整性检查未通过"}
+                                    description={
+                                      ruleAiReviews[index]?.result?.precheck.passed
+                                        ? "当前规则相关必填信息已齐全，可以基于现有填写内容进行 AI 复核。"
+                                        : (
+                                            <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                              {ruleAiReviews[index]?.result?.precheck.missing_fields.map((item: SearchCaseAiReviewMissingField) => (
+                                                <li key={item.field}>{`${item.label}：${item.message}`}</li>
+                                              ))}
+                                            </ul>
+                                          )
+                                    }
+                                  />
+                                  {ruleAiReviews[index]?.errorMessage ? (
+                                    <Alert type="error" showIcon message="AI 复核失败" description={ruleAiReviews[index]?.errorMessage} />
+                                  ) : null}
+                                  {ruleAiReviews[index]?.result?.review_result ? (
+                                    <Alert
+                                      type={
+                                        ruleAiReviews[index]?.result?.review_result?.overall_status === "pass"
+                                          ? "success"
+                                          : ruleAiReviews[index]?.result?.review_result?.overall_status === "risk"
+                                            ? "warning"
+                                            : "error"
+                                      }
+                                      showIcon
+                                      message={`整体结论：${ruleAiReviews[index]?.result?.review_result?.overall_status}`}
+                                      description={ruleAiReviews[index]?.result?.review_result?.summary}
+                                    />
+                                  ) : null}
+                                  {ruleAiReviews[index]?.result?.rule_review ? (
+                                    <Card size="small" title="规则复核结果">
+                                      <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                                        <Tag
+                                          color={
+                                            ruleAiReviews[index]?.result?.rule_review?.status === "pass"
+                                              ? "success"
+                                              : ruleAiReviews[index]?.result?.rule_review?.status === "risk"
+                                                ? "warning"
+                                                : "error"
+                                          }
+                                        >
+                                          {`状态：${ruleAiReviews[index]?.result?.rule_review?.status}`}
+                                        </Tag>
+                                        {ruleAiReviews[index]?.result?.rule_review?.issues.length ? (
+                                          <Typography.Text type="secondary">
+                                            {`问题标签：${ruleAiReviews[index]?.result?.rule_review?.issues.join(" / ")}`}
+                                          </Typography.Text>
+                                        ) : null}
+                                        {Object.entries(
+                                          (ruleAiReviews[index]?.result?.rule_review?.checks ?? {}) as Record<string, { passed: boolean; detail: string }>,
+                                        ).map(([key, item]) => (
+                                          <Alert key={key} type={item.passed ? "success" : "warning"} showIcon message={key} description={item.detail} />
+                                        ))}
+                                        <Typography.Paragraph style={{ marginBottom: 0 }}>
+                                          {ruleAiReviews[index]?.result?.rule_review?.reference_advice}
+                                        </Typography.Paragraph>
+                                        {(ruleAiReviews[index]?.result?.rule_review?.extra_suggestions ?? []).length ? (
+                                          <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                            {ruleAiReviews[index]?.result?.rule_review?.extra_suggestions.map((item: string) => (
+                                              <li key={item}>{item}</li>
+                                            ))}
+                                          </ul>
+                                        ) : null}
+                                      </Space>
+                                    </Card>
+                                  ) : null}
+                                  {ruleAiReviews[index]?.result?.model_1_review ? (
+                                    <Card size="small" title={`${currentTask.model_a_name} 复核结果`}>
+                                      <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                                        <Tag color={ruleAiReviews[index]?.result?.model_1_review?.consistency === "consistent" ? "success" : "warning"}>
+                                          {`AI判断 ${ruleAiReviews[index]?.result?.model_1_review?.ai_judgement} / 与人工 ${ruleAiReviews[index]?.result?.model_1_review?.consistency}`}
+                                        </Tag>
+                                        <Typography.Text>{`人工备注质量：${ruleAiReviews[index]?.result?.model_1_review?.remark_quality}`}</Typography.Text>
+                                        <Typography.Paragraph style={{ marginBottom: 0 }}>
+                                          {ruleAiReviews[index]?.result?.model_1_review?.reason}
+                                        </Typography.Paragraph>
+                                        <Typography.Paragraph style={{ marginBottom: 0 }}>
+                                          {ruleAiReviews[index]?.result?.model_1_review?.reference_advice}
+                                        </Typography.Paragraph>
+                                        {(ruleAiReviews[index]?.result?.model_1_review?.extra_suggestions ?? []).length ? (
+                                          <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                            {ruleAiReviews[index]?.result?.model_1_review?.extra_suggestions.map((item: string) => (
+                                              <li key={item}>{item}</li>
+                                            ))}
+                                          </ul>
+                                        ) : null}
+                                      </Space>
+                                    </Card>
+                                  ) : null}
+                                  {ruleAiReviews[index]?.result?.model_2_review ? (
+                                    <Card size="small" title={`${currentTask.model_b_name} 复核结果`}>
+                                      <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                                        <Tag color={ruleAiReviews[index]?.result?.model_2_review?.consistency === "consistent" ? "success" : "warning"}>
+                                          {`AI判断 ${ruleAiReviews[index]?.result?.model_2_review?.ai_judgement} / 与人工 ${ruleAiReviews[index]?.result?.model_2_review?.consistency}`}
+                                        </Tag>
+                                        <Typography.Text>{`人工备注质量：${ruleAiReviews[index]?.result?.model_2_review?.remark_quality}`}</Typography.Text>
+                                        <Typography.Paragraph style={{ marginBottom: 0 }}>
+                                          {ruleAiReviews[index]?.result?.model_2_review?.reason}
+                                        </Typography.Paragraph>
+                                        <Typography.Paragraph style={{ marginBottom: 0 }}>
+                                          {ruleAiReviews[index]?.result?.model_2_review?.reference_advice}
+                                        </Typography.Paragraph>
+                                        {(ruleAiReviews[index]?.result?.model_2_review?.extra_suggestions ?? []).length ? (
+                                          <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                            {ruleAiReviews[index]?.result?.model_2_review?.extra_suggestions.map((item: string) => (
+                                              <li key={item}>{item}</li>
+                                            ))}
+                                          </ul>
+                                        ) : null}
+                                      </Space>
+                                    </Card>
+                                  ) : null}
+                                </Space>
+                              </Card>
+                            ) : null}
                           </Card>
                         ))}
                       </Space>

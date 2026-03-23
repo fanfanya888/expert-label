@@ -18,6 +18,10 @@ import type {
   ProjectItem,
   ProjectListResult,
   SingleTurnSearchCaseSchema,
+  SingleTurnSearchCaseAiModelCheckResponse,
+  SingleTurnSearchCaseAiReviewPayload,
+  SingleTurnSearchCaseAiReviewResponse,
+  SingleTurnSearchCaseAiRuleCheckResponse,
   SingleTurnSearchCaseSubmissionDetail,
   SingleTurnSearchCaseSubmissionPayload,
   SingleTurnSearchCaseSubmissionResult,
@@ -250,6 +254,58 @@ export function validateSingleTurnSearchCaseSubmission(
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function reviewSingleTurnSearchCaseRuleWithAi(
+  projectId: number,
+  payload: SingleTurnSearchCaseAiReviewPayload,
+) {
+  return request<SingleTurnSearchCaseAiReviewResponse>(
+    `/api/plugins/single_turn_search_case/projects/${projectId}/rule-ai-review`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function reviewSingleTurnSearchCaseRuleDefinitionWithAi(
+  projectId: number,
+  payload: SingleTurnSearchCaseAiReviewPayload,
+) {
+  return request<SingleTurnSearchCaseAiRuleCheckResponse>(
+    `/api/plugins/single_turn_search_case/projects/${projectId}/rule-definition-ai-review`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function reviewSingleTurnSearchCaseModelAWithAi(
+  projectId: number,
+  payload: SingleTurnSearchCaseAiReviewPayload,
+) {
+  return request<SingleTurnSearchCaseAiModelCheckResponse>(
+    `/api/plugins/single_turn_search_case/projects/${projectId}/model-a-ai-review`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function reviewSingleTurnSearchCaseModelBWithAi(
+  projectId: number,
+  payload: SingleTurnSearchCaseAiReviewPayload,
+) {
+  return request<SingleTurnSearchCaseAiModelCheckResponse>(
+    `/api/plugins/single_turn_search_case/projects/${projectId}/model-b-ai-review`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export function submitSingleTurnSearchCaseSubmission(

@@ -54,6 +54,26 @@ class SingleTurnSearchCasePlugin(AnnotationPlugin):
     def validate_project_submission(self, db: Session, project_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         return self.service.validate_submission(db, project_id, payload).model_dump(mode="json")
 
+    def review_project_rule_with_ai(self, db: Session, project_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.service.review_rule_with_ai(db, project_id, payload).model_dump(mode="json")
+
+    def review_project_rule_definition_with_ai(
+        self,
+        db: Session,
+        project_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.service.review_rule_definition_with_ai(db, project_id, payload).model_dump(mode="json")
+
+    def review_project_model_with_ai(
+        self,
+        db: Session,
+        project_id: int,
+        payload: dict[str, Any],
+        target_model: str,
+    ) -> dict[str, Any]:
+        return self.service.review_model_with_ai(db, project_id, payload, target_model).model_dump(mode="json")
+
     def save_project_submission(self, db: Session, project_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         return self.service.save_submission(db, project_id, payload).model_dump(mode="json")
 
