@@ -191,7 +191,7 @@ export function AccountsPage() {
 
       <Table<AdminUserItem>
         rowKey="id"
-        dataSource={items}
+        dataSource={Array.isArray(items) ? items : []}
         loading={loading}
         pagination={false}
         locale={{ emptyText: "暂无账号" }}

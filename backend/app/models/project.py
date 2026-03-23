@@ -16,6 +16,26 @@ class Project(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(100), index=True)
     description: Mapped[str | None] = mapped_column(Text(), nullable=True)
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    plugin_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    entry_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    publish_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="offline",
+        server_default=sa.text("'offline'"),
+    )
+    is_visible: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=sa.false(),
+    )
+    source_type: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="unknown",
+        server_default=sa.text("'unknown'"),
+    )
     external_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_published: Mapped[bool] = mapped_column(
         Boolean,

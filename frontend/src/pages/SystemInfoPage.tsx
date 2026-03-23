@@ -75,7 +75,7 @@ export function SystemInfoPage() {
           <Card title="已注册插件" className="panel-card">
             <Table<PluginMeta>
               rowKey="key"
-              dataSource={info?.plugins ?? []}
+              dataSource={Array.isArray(info?.plugins) ? info.plugins : []}
               pagination={false}
               locale={{ emptyText: "暂无插件" }}
               columns={[

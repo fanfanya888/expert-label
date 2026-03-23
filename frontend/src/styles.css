@@ -69,6 +69,68 @@ body {
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
 }
 
+.review-page {
+  padding-bottom: 8px;
+}
+
+.review-card {
+  border: 1px solid #d9e2ee;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.04);
+}
+
+.review-card .ant-card-head {
+  border-bottom-color: #edf2f7;
+}
+
+.review-card--overview {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.review-text-block.ant-typography {
+  max-height: 320px;
+  overflow: auto;
+  padding: 14px 16px;
+  border: 1px solid #e7ecf3;
+  border-radius: 12px;
+  background: #f8fbff;
+  white-space: pre-wrap;
+  line-height: 1.75;
+}
+
+.review-rubric-level {
+  padding: 14px 16px;
+  border: 1px solid #e7ecf3;
+  border-radius: 12px;
+  background: #fbfdff;
+}
+
+.review-rubric-notes {
+  margin: 0;
+  padding-left: 20px;
+  color: #475467;
+}
+
+.review-rating-group {
+  width: 100%;
+}
+
+.search-case-page {
+  padding-bottom: 8px;
+}
+
+.search-case-card {
+  border: 1px solid #d8e2ef;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.04);
+}
+
+.search-case-card .ant-card-head {
+  border-bottom-color: #edf2f7;
+}
+
 .metric-card .ant-statistic {
   margin-bottom: 16px;
 }

@@ -17,12 +17,20 @@ class ProjectRead(ORMModel):
     name: str
     description: str | None
     owner_id: int | None
+    plugin_code: str | None
+    entry_path: str | None
+    publish_status: str
+    is_visible: bool
+    source_type: str
     external_url: str | None
     is_published: bool
     published_at: datetime | None
     published_by: int | None
     created_at: datetime
     updated_at: datetime
+    task_total: int = 0
+    task_completed: int = 0
+    task_pending: int = 0
     owner: UserRead | None = None
 
 

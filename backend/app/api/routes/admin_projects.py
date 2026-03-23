@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.core.response import build_response, serialize_schema
 from app.crud.projects import (
+    build_project_payload,
     get_project_by_id,
+    get_project_task_stats_map,
     list_projects,
     publish_project,
     unpublish_project,
@@ -24,9 +26,13 @@ def list_admin_projects(
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     items, total = list_projects(db, skip=skip, limit=limit)
+    stats_map = get_project_task_stats_map(db, [item.id for item in items])
     data = ProjectList(
         total=total,
-        items=[ProjectRead.model_validate(item) for item in items],
+        items=[
+            ProjectRead.model_validate(build_project_payload(item, stats_map.get(item.id)))
+            for item in items
+        ],
     )
     return build_response(data=serialize_schema(data))
 
@@ -40,7 +46,8 @@ def get_admin_project_detail(
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
 
-    data = ProjectRead.model_validate(project)
+    stats_map = get_project_task_stats_map(db, [project.id])
+    data = ProjectRead.model_validate(build_project_payload(project, stats_map.get(project.id)))
     return build_response(data=serialize_schema(data))
 
 
@@ -59,11 +66,9 @@ def publish_admin_project(
         raise HTTPException(status_code=404, detail="发布人不存在")
 
     updated_project = publish_project(db, project, published_by_user_id=published_by_user_id)
-    data = ProjectRead.model_validate(updated_project)
-    return build_response(
-        message="项目已发布",
-        data=serialize_schema(data),
-    )
+    stats_map = get_project_task_stats_map(db, [updated_project.id])
+    data = ProjectRead.model_validate(build_project_payload(updated_project, stats_map.get(updated_project.id)))
+    return build_response(message="项目已发布", data=serialize_schema(data))
 
 
 @router.patch("/{project_id}/unpublish")
@@ -76,8 +81,6 @@ def unpublish_admin_project(
         raise HTTPException(status_code=404, detail="项目不存在")
 
     updated_project = unpublish_project(db, project)
-    data = ProjectRead.model_validate(updated_project)
-    return build_response(
-        message="项目已下线",
-        data=serialize_schema(data),
-    )
+    stats_map = get_project_task_stats_map(db, [updated_project.id])
+    data = ProjectRead.model_validate(build_project_payload(updated_project, stats_map.get(updated_project.id)))
+    return build_response(message="项目已下线", data=serialize_schema(data))
