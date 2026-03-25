@@ -34,8 +34,8 @@ class ProjectTask(TimestampMixin, Base):
     task_status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
-        default="pending",
-        server_default=sa.text("'pending'"),
+        default="annotation_pending",
+        server_default=sa.text("'annotation_pending'"),
         index=True,
     )
     is_visible: Mapped[bool] = mapped_column(
@@ -45,3 +45,7 @@ class ProjectTask(TimestampMixin, Base):
         server_default=sa.false(),
     )
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    annotation_assignee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    annotation_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    annotation_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

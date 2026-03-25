@@ -188,7 +188,7 @@ export function SingleTurnSearchCaseResultsPage() {
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
             <Descriptions bordered column={2}>
               <Descriptions.Item label="任务 ID">{detail.task_id}</Descriptions.Item>
-              <Descriptions.Item label="提交人">{detail.annotator_id ?? "-"}</Descriptions.Item>
+              <Descriptions.Item label="用户 ID">{detail.annotator_id ?? "-"}</Descriptions.Item>
               <Descriptions.Item label="题目领域">{detail.domain}</Descriptions.Item>
               <Descriptions.Item label="时效性标签">{detail.timeliness_tag}</Descriptions.Item>
               <Descriptions.Item label="规则数量">{detail.rule_count}</Descriptions.Item>

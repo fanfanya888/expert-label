@@ -33,25 +33,24 @@ import type {
   AdminUserUpdatePayload,
   UserRole,
 } from "../../types/api";
-import { getRoleLabel } from "../../utils/mockSession";
+import { getRoleLabel } from "../../utils/session";
 
 interface UserFormValues {
   username: string;
   email: string;
+  password?: string;
   role: UserRole;
   is_active: boolean;
+  can_annotate: boolean;
+  can_review: boolean;
 }
 
 const roleOptions = [
-  { label: "超级管理员", value: "super_admin" },
   { label: "管理员", value: "admin" },
-  { label: "标注员", value: "annotator" },
+  { label: "用户", value: "user" },
 ];
 
 function roleColor(role: UserRole): string {
-  if (role === "super_admin") {
-    return "red";
-  }
   if (role === "admin") {
     return "blue";
   }
@@ -60,6 +59,7 @@ function roleColor(role: UserRole): string {
 
 export function AccountsPage() {
   const [form] = Form.useForm<UserFormValues>();
+  const watchedRole = Form.useWatch("role", form);
   const [items, setItems] = useState<AdminUserItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -94,8 +94,11 @@ export function AccountsPage() {
     setEditingUser(null);
     form.resetFields();
     form.setFieldsValue({
-      role: "annotator",
+      role: "user",
       is_active: true,
+      password: "",
+      can_annotate: true,
+      can_review: false,
     });
     setModalOpen(true);
   };
@@ -110,6 +113,9 @@ export function AccountsPage() {
         email: detail.email,
         role: detail.role,
         is_active: detail.is_active,
+        password: "",
+        can_annotate: detail.can_annotate,
+        can_review: detail.can_review,
       });
       setModalOpen(true);
     } catch {
@@ -132,8 +138,11 @@ export function AccountsPage() {
         const payload: AdminUserUpdatePayload = {
           username: values.username,
           email: values.email,
+          password: values.password || undefined,
           role: values.role,
           is_active: values.is_active,
+          can_annotate: values.role === "user" ? values.can_annotate : false,
+          can_review: values.role === "user" ? values.can_review : false,
         };
         await updateAdminUser(editingUser.id, payload);
         message.success("账号已更新");
@@ -141,8 +150,11 @@ export function AccountsPage() {
         const payload: AdminUserCreatePayload = {
           username: values.username,
           email: values.email,
+          password: values.password || "",
           role: values.role,
           is_active: values.is_active,
+          can_annotate: values.role === "user" ? values.can_annotate : false,
+          can_review: values.role === "user" ? values.can_review : false,
         };
         await createAdminUser(payload);
         message.success("账号已创建");
@@ -182,7 +194,7 @@ export function AccountsPage() {
       }
     >
       <Typography.Paragraph type="secondary">
-        当前提供最小可用的账号列表、创建、编辑和启用/禁用能力，角色支持超级管理员、管理员和标注员。
+        当前提供最小可用的账号列表、创建、编辑、重置密码和启用/禁用能力，角色只保留管理员和用户。
       </Typography.Paragraph>
 
       {loadError ? (
@@ -208,6 +220,20 @@ export function AccountsPage() {
             title: "角色",
             dataIndex: "role",
             render: (value: UserRole) => <Tag color={roleColor(value)}>{getRoleLabel(value)}</Tag>,
+          },
+          {
+            title: "作业权限",
+            render: (_, record) => {
+              if (record.role === "admin") {
+                return <Tag>后台管理</Tag>;
+              }
+              return (
+                <Space wrap>
+                  {record.can_annotate ? <Tag color="blue">标注</Tag> : null}
+                  {record.can_review ? <Tag color="purple">质检</Tag> : null}
+                </Space>
+              );
+            },
           },
           {
             title: "状态",
@@ -263,7 +289,7 @@ export function AccountsPage() {
           layout="vertical"
           form={form}
           onFinish={submitForm}
-          initialValues={{ role: "annotator", is_active: true }}
+          initialValues={{ role: "user", is_active: true, can_annotate: true, can_review: false }}
         >
           <Form.Item
             label="账号"
@@ -280,12 +306,42 @@ export function AccountsPage() {
             <Input placeholder="请输入邮箱" />
           </Form.Item>
           <Form.Item
+            label={editingUser ? "重置密码" : "初始密码"}
+            name="password"
+            rules={[
+              { required: !editingUser, message: "请输入密码" },
+              { min: 8, message: "密码至少 8 位" },
+            ]}
+            extra={editingUser ? "留空表示不修改当前密码" : "密码至少 8 位"}
+          >
+            <Input.Password placeholder={editingUser ? "留空则不修改" : "请输入初始密码"} />
+          </Form.Item>
+          <Form.Item
             label="角色"
             name="role"
             rules={[{ required: true, message: "请选择角色" }]}
           >
-            <Select options={roleOptions} />
+            <Select
+              options={roleOptions}
+              onChange={(value: UserRole) => {
+                if (value === "admin") {
+                  form.setFieldsValue({ can_annotate: false, can_review: false });
+                } else if (!form.getFieldValue("can_annotate") && !form.getFieldValue("can_review")) {
+                  form.setFieldsValue({ can_annotate: true });
+                }
+              }}
+            />
           </Form.Item>
+          {watchedRole === "user" ? (
+            <Space size={24} style={{ marginBottom: 16 }}>
+              <Form.Item label="标注权限" name="can_annotate" valuePropName="checked" style={{ marginBottom: 0 }}>
+                <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+              </Form.Item>
+              <Form.Item label="质检权限" name="can_review" valuePropName="checked" style={{ marginBottom: 0 }}>
+                <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+              </Form.Item>
+            </Space>
+          ) : null}
           <Form.Item label="启用状态" name="is_active" valuePropName="checked">
             <Switch checkedChildren="启用" unCheckedChildren="禁用" />
           </Form.Item>

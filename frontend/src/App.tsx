@@ -9,11 +9,17 @@ import { SystemInfoPage } from "./pages/SystemInfoPage";
 import { AccountsPage } from "./pages/admin/AccountsPage";
 import { ProjectTasksPage } from "./pages/admin/ProjectTasksPage";
 import { ModelResponseReviewPage } from "./pages/user/ModelResponseReviewPage";
+import { ModelResponseReviewSubmissionDetailPage } from "./pages/user/ModelResponseReviewSubmissionDetailPage";
 import { MyProjectsPage } from "./pages/user/MyProjectsPage";
+import { ProjectReviewPage } from "./pages/user/ProjectReviewPage";
 import { ProjectWorkspacePage } from "./pages/user/ProjectWorkspacePage";
-import { SingleTurnSearchCaseResultsPage } from "./pages/admin/SingleTurnSearchCaseResultsPage";
+import { ReviewTasksPage } from "./pages/user/ReviewTasksPage";
 import { SingleTurnSearchCasePage } from "./pages/user/SingleTurnSearchCasePage";
-import { PortalRoute, RootRedirect } from "./router/RouteGuards";
+import { SingleTurnSearchCaseSubmissionDetailPage } from "./pages/user/SingleTurnSearchCaseSubmissionDetailPage";
+import { SubmissionRecordsPage } from "./pages/user/SubmissionRecordsPage";
+import { TaskHallPage } from "./pages/user/TaskHallPage";
+import { SingleTurnSearchCaseResultsPage } from "./pages/admin/SingleTurnSearchCaseResultsPage";
+import { PortalRoute, RootRedirect, UserPortalRedirect } from "./router/RouteGuards";
 
 export default function App() {
   return (
@@ -36,12 +42,34 @@ export default function App() {
 
         <Route element={<PortalRoute allowedPortal="user" />}>
           <Route path="/user" element={<UserLayout />}>
-            <Route index element={<Navigate to="projects" replace />} />
-            <Route path="projects" element={<MyProjectsPage />} />
+            <Route index element={<UserPortalRedirect />} />
+            <Route path="task-hall" element={<TaskHallPage />} />
+            <Route path="annotation-tasks" element={<MyProjectsPage />} />
+            <Route path="submission-records" element={<SubmissionRecordsPage />} />
+            <Route path="review-tasks" element={<ReviewTasksPage />} />
             <Route path="projects/:projectId/workspace" element={<ProjectWorkspacePage />} />
-            <Route path="projects/:projectId/model-response-review" element={<ModelResponseReviewPage />} />
-            <Route path="projects/:projectId/single-turn-search-case" element={<SingleTurnSearchCasePage />} />
+            <Route path="projects/:projectId/review" element={<ProjectReviewPage />} />
           </Route>
+
+          <Route path="/user/projects/:projectId/model-response-review" element={<ModelResponseReviewPage />} />
+          <Route
+            path="/user/projects/:projectId/model-response-review/submissions/:taskId"
+            element={<ModelResponseReviewSubmissionDetailPage />}
+          />
+          <Route
+            path="/user/projects/:projectId/model-response-review/records/:submissionId"
+            element={<ModelResponseReviewSubmissionDetailPage />}
+          />
+
+          <Route path="/user/projects/:projectId/single-turn-search-case" element={<SingleTurnSearchCasePage />} />
+          <Route
+            path="/user/projects/:projectId/single-turn-search-case/submissions/:taskId"
+            element={<SingleTurnSearchCaseSubmissionDetailPage />}
+          />
+          <Route
+            path="/user/projects/:projectId/single-turn-search-case/records/:submissionId"
+            element={<SingleTurnSearchCaseSubmissionDetailPage />}
+          />
         </Route>
 
         <Route path="*" element={<RootRedirect />} />

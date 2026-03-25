@@ -1,4 +1,4 @@
-export type UserRole = "super_admin" | "admin" | "annotator";
+export type UserRole = "admin" | "user";
 
 export interface ApiEnvelope<T> {
   code: number;
@@ -38,6 +38,8 @@ export interface AdminUserItem {
   email: string;
   role: UserRole;
   is_active: boolean;
+  can_annotate: boolean;
+  can_review: boolean;
   last_login_at: string | null;
   created_at: string;
   updated_at: string;
@@ -51,15 +53,42 @@ export interface AdminUserListResult {
 export interface AdminUserCreatePayload {
   username: string;
   email: string;
+  password: string;
   role: UserRole;
   is_active: boolean;
+  can_annotate: boolean;
+  can_review: boolean;
 }
 
 export interface AdminUserUpdatePayload {
   username?: string;
   email?: string;
+  password?: string;
   role?: UserRole;
   is_active?: boolean;
+  can_annotate?: boolean;
+  can_review?: boolean;
+}
+
+export interface AuthUser {
+  id: number;
+  username: string;
+  email: string;
+  role: UserRole;
+  can_annotate: boolean;
+  can_review: boolean;
+}
+
+export interface AuthLoginPayload {
+  username: string;
+  password: string;
+}
+
+export interface AuthSession {
+  access_token: string;
+  token_type: string;
+  expires_at: string;
+  user: AuthUser;
 }
 
 export interface ProjectItem {
@@ -89,6 +118,42 @@ export interface ProjectListResult {
   items: ProjectItem[];
 }
 
+export interface TaskHallProjectItem extends ProjectItem {
+  annotation_available_count: number;
+  review_available_count: number;
+  claim_progress_percent: number;
+  current_user_annotation_limit: number;
+  current_user_annotation_owned_count: number;
+  current_user_task_id: string | null;
+  current_user_task_status: string | null;
+  trial_passed: boolean;
+  can_claim_annotation: boolean;
+  can_claim_review: boolean;
+}
+
+export interface TaskHallListResult {
+  total: number;
+  items: TaskHallProjectItem[];
+}
+
+export interface UserSubmissionRecordItem {
+  plugin_code: string;
+  plugin_name: string;
+  submission_id: number;
+  project_id: number | null;
+  project_name: string | null;
+  task_id: string;
+  submitted_at: string;
+  title: string;
+  summary: string | null;
+  result_label: string | null;
+}
+
+export interface UserSubmissionRecordListResult {
+  total: number;
+  items: UserSubmissionRecordItem[];
+}
+
 export interface AdminProjectTaskItem {
   id: number;
   project_id: number;
@@ -99,6 +164,15 @@ export interface AdminProjectTaskItem {
   task_status: string;
   is_visible: boolean;
   published_at: string | null;
+  annotation_assignee_id: number | null;
+  annotation_assignee_username: string | null;
+  annotation_claimed_at: string | null;
+  annotation_submitted_at: string | null;
+  approved_at: string | null;
+  review_round_count: number;
+  latest_reviewer_id: number | null;
+  latest_reviewer_username: string | null;
+  latest_review_status: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -111,6 +185,33 @@ export interface AdminProjectTaskListResult {
 export interface AdminProjectTaskCreatePayload {
   external_task_id?: string | null;
   task_payload: Record<string, unknown>;
+}
+
+export interface ProjectTaskReviewItem {
+  id: number;
+  project_task_id: number;
+  review_round: number;
+  review_status: string;
+  reviewer_id: number | null;
+  reviewer_username: string | null;
+  review_result: "pass" | "reject" | null;
+  review_comment: string | null;
+  claimed_at: string | null;
+  submitted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectTaskReviewSubmitPayload {
+  review_result: "pass" | "reject";
+  review_comment: string;
+}
+
+export interface ProjectTaskReviewTaskDetail {
+  review: ProjectTaskReviewItem;
+  task: AdminProjectTaskItem;
+  submission: Record<string, unknown> | null;
+  review_history: ProjectTaskReviewItem[];
 }
 
 export interface ModelResponseReviewTaskTemplatePayload {

@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.task_workflow import (
+    TASK_COMPLETED_STATUSES,
+    TASK_STATUS_ANNOTATION_IN_PROGRESS,
+    TASK_STATUS_PENDING_REVIEW_DISPATCH,
+)
+from app.crud.project_tasks import claim_annotation_task
 from app.models.project import Project
 from app.models.project_task import ProjectTask
 from app.models.single_turn_search_case_record import SingleTurnSearchCaseRecord
@@ -108,7 +115,7 @@ class SingleTurnSearchCaseService:
                     ProjectTask.plugin_code == self.plugin_code,
                     ProjectTask.publish_status == "published",
                     ProjectTask.is_visible.is_(True),
-                    ProjectTask.task_status == "completed",
+                    ProjectTask.task_status.in_(TASK_COMPLETED_STATUSES),
                 )
             )
             or 0
@@ -120,18 +127,13 @@ class SingleTurnSearchCaseService:
             pending_tasks=max(int(total) - int(completed), 0),
         )
 
-    def get_current_task(self, db: Session, project_id: int) -> SingleTurnSearchCaseTaskRead | None:
+    def get_current_task(self, db: Session, project_id: int, user_id: int) -> SingleTurnSearchCaseTaskRead | None:
         self.get_project_or_raise(db, project_id)
-        task = db.scalar(
-            select(ProjectTask)
-            .where(
-                ProjectTask.project_id == project_id,
-                ProjectTask.plugin_code == self.plugin_code,
-                ProjectTask.publish_status == "published",
-                ProjectTask.is_visible.is_(True),
-                ProjectTask.task_status == "pending",
-            )
-            .order_by(ProjectTask.published_at.asc().nullslast(), ProjectTask.id.asc())
+        task = claim_annotation_task(
+            db,
+            project_id=project_id,
+            plugin_code=self.plugin_code,
+            user_id=user_id,
         )
         if task is None:
             return None
@@ -276,10 +278,16 @@ class SingleTurnSearchCaseService:
                 valid=False,
                 errors=[SingleTurnSearchCaseValidationIssue(field="task_id", message="task is not published")],
             )
-        if task.task_status == "completed":
+        if task.task_status != TASK_STATUS_ANNOTATION_IN_PROGRESS:
             return SingleTurnSearchCaseValidationResult(
                 valid=False,
-                errors=[SingleTurnSearchCaseValidationIssue(field="task_id", message="task has already been completed")],
+                errors=[SingleTurnSearchCaseValidationIssue(field="task_id", message="task is not assigned for annotation")],
+            )
+
+        if task.annotation_assignee_id != normalized.annotator_id:
+            return SingleTurnSearchCaseValidationResult(
+                valid=False,
+                errors=[SingleTurnSearchCaseValidationIssue(field="annotator_id", message="task belongs to another annotator")],
             )
 
         template = SingleTurnSearchCaseTaskPayload.model_validate(task.task_payload)
@@ -354,7 +362,8 @@ class SingleTurnSearchCaseService:
         )
         db.add(record)
 
-        task.task_status = "completed"
+        task.task_status = TASK_STATUS_PENDING_REVIEW_DISPATCH
+        task.annotation_submitted_at = datetime.now(timezone.utc)
         db.add(task)
         db.commit()
         db.refresh(record)
@@ -379,6 +388,7 @@ class SingleTurnSearchCaseService:
         *,
         limit: int = 50,
         task_id: str | None = None,
+        annotator_id: int | None = None,
         require_published: bool = False,
     ) -> list[SingleTurnSearchCaseSubmissionSummary]:
         self.get_project_or_raise(db, project_id, require_published=require_published)
@@ -389,6 +399,8 @@ class SingleTurnSearchCaseService:
         )
         if task_id:
             statement = statement.where(SingleTurnSearchCaseRecord.task_id == task_id)
+        if annotator_id is not None:
+            statement = statement.where(SingleTurnSearchCaseRecord.annotator_id == annotator_id)
         statement = statement.limit(limit)
         items = list(db.scalars(statement).all())
         return [self._build_summary(item) for item in items]
@@ -411,6 +423,63 @@ class SingleTurnSearchCaseService:
         if record is None:
             return None
         return self._build_detail(record)
+
+    def get_task_submission_detail(
+        self,
+        db: Session,
+        project_id: int,
+        task_id: str,
+        *,
+        annotator_id: int,
+    ) -> SingleTurnSearchCaseSubmissionDetail | None:
+        items = self.list_submission_summaries(
+            db,
+            project_id,
+            limit=1,
+            task_id=task_id,
+            annotator_id=annotator_id,
+            require_published=False,
+        )
+        if not items:
+            return None
+        return self.get_submission_detail(
+            db,
+            project_id,
+            items[0].submission_id,
+            require_published=False,
+        )
+
+    def get_my_submission_detail(
+        self,
+        db: Session,
+        project_id: int,
+        submission_id: int,
+        *,
+        annotator_id: int,
+    ) -> SingleTurnSearchCaseSubmissionDetail | None:
+        self.get_project_or_raise(db, project_id, require_published=False)
+        record = db.scalar(
+            select(SingleTurnSearchCaseRecord).where(
+                SingleTurnSearchCaseRecord.project_id == project_id,
+                SingleTurnSearchCaseRecord.id == submission_id,
+                SingleTurnSearchCaseRecord.annotator_id == annotator_id,
+            )
+        )
+        if record is None:
+            return None
+        return self._build_detail(record)
+
+    def delete_task_records(self, db: Session, project_id: int, task_id: str) -> None:
+        self.get_project_or_raise(db, project_id, require_published=False)
+        rows = db.scalars(
+            select(SingleTurnSearchCaseRecord).where(
+                SingleTurnSearchCaseRecord.project_id == project_id,
+                SingleTurnSearchCaseRecord.task_id == task_id,
+            )
+        ).all()
+        for row in rows:
+            db.delete(row)
+        db.flush()
 
     def _validate_submission_against_template(
         self,

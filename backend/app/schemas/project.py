@@ -2,14 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
-
 from app.schemas.common import ListResult, ORMModel
 from app.schemas.user import UserRead
-
-
-class ProjectPublishPayload(BaseModel):
-    published_by_user_id: int | None = None
 
 
 class ProjectRead(ORMModel):
@@ -36,3 +30,20 @@ class ProjectRead(ORMModel):
 
 class ProjectList(ListResult):
     items: list[ProjectRead]
+
+
+class ProjectHallRead(ProjectRead):
+    annotation_available_count: int = 0
+    review_available_count: int = 0
+    claim_progress_percent: int = 0
+    current_user_annotation_limit: int = 1
+    current_user_annotation_owned_count: int = 0
+    current_user_task_id: str | None = None
+    current_user_task_status: str | None = None
+    trial_passed: bool = False
+    can_claim_annotation: bool = False
+    can_claim_review: bool = False
+
+
+class ProjectHallList(ListResult):
+    items: list[ProjectHallRead]

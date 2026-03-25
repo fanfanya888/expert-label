@@ -16,16 +16,6 @@ function getPublishStatusText(status: string): string {
   return status;
 }
 
-function getSourceTypeText(sourceType: string): string {
-  if (sourceType === "plugin_seed") {
-    return "插件默认项目";
-  }
-  if (sourceType === "unknown") {
-    return "未知来源";
-  }
-  return sourceType;
-}
-
 export function ProjectsPage() {
   const navigate = useNavigate();
   const [items, setItems] = useState<ProjectItem[]>([]);
@@ -75,7 +65,10 @@ export function ProjectsPage() {
 
   return (
     <Space direction="vertical" size={20} style={{ width: "100%" }}>
+      {loadError ? <Alert type="warning" showIcon message="获取项目列表失败" description={loadError} /> : null}
+
       <Card
+        title="项目列表"
         className="panel-card"
         extra={
           <Button icon={<ReloadOutlined />} onClick={() => void loadProjects()} loading={loading}>
@@ -83,17 +76,6 @@ export function ProjectsPage() {
           </Button>
         }
       >
-        <Typography.Title level={4} style={{ marginTop: 0 }}>
-          微服务项目发布管理
-        </Typography.Title>
-        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          平台不负责创建复杂标注项目，只负责展示项目、管理项目发布状态，并进入项目级任务管理。
-        </Typography.Paragraph>
-      </Card>
-
-      {loadError ? <Alert type="warning" showIcon message="获取项目列表失败" description={loadError} /> : null}
-
-      <Card title="项目列表" className="panel-card">
         <Table<ProjectItem>
           rowKey="id"
           dataSource={Array.isArray(items) ? items : []}
@@ -107,15 +89,6 @@ export function ProjectsPage() {
                 <Space direction="vertical" size={4}>
                   <Typography.Text strong>{record.name}</Typography.Text>
                   <Typography.Text type="secondary">{record.description || "暂无项目说明"}</Typography.Text>
-                </Space>
-              ),
-            },
-            {
-              title: "插件信息",
-              render: (_, record) => (
-                <Space direction="vertical" size={4}>
-                  <Typography.Text>{record.plugin_code || "-"}</Typography.Text>
-                  <Typography.Text type="secondary">来源：{getSourceTypeText(record.source_type)}</Typography.Text>
                 </Space>
               ),
             },

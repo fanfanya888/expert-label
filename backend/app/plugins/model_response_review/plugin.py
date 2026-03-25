@@ -46,8 +46,8 @@ class ModelResponseReviewPlugin(AnnotationPlugin):
     def validate_task_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.service.validate_task_payload(payload)
 
-    def get_project_current_task(self, db: Session, project_id: int) -> dict[str, Any] | None:
-        task = self.service.get_current_task(db, project_id)
+    def get_project_current_task(self, db: Session, project_id: int, user_id: int) -> dict[str, Any] | None:
+        task = self.service.get_current_task(db, project_id, user_id)
         if task is None:
             return None
         return task.model_dump(mode="json")
@@ -109,3 +109,64 @@ class ModelResponseReviewPlugin(AnnotationPlugin):
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         return self.service.save_submission(db, project_id, payload).model_dump(mode="json")
+
+    def get_latest_task_submission_detail(
+        self,
+        db: Session,
+        project_id: int,
+        task_id: str,
+    ) -> dict[str, Any] | None:
+        items = self.service.list_submission_records(
+            db,
+            project_id,
+            limit=1,
+            task_id=task_id,
+            require_published=False,
+        )
+        if not items:
+            return None
+        return items[0].model_dump(mode="json")
+
+    def get_my_task_submission_detail(
+        self,
+        db: Session,
+        project_id: int,
+        task_id: str,
+        *,
+        annotator_id: int,
+    ) -> dict[str, Any] | None:
+        item = self.service.get_task_submission_detail(
+            db,
+            project_id,
+            task_id,
+            annotator_id=annotator_id,
+        )
+        if item is None:
+            return None
+        return item.model_dump(mode="json")
+
+    def get_my_submission_detail(
+        self,
+        db: Session,
+        project_id: int,
+        submission_id: int,
+        *,
+        annotator_id: int,
+    ) -> dict[str, Any] | None:
+        item = self.service.get_submission_detail(
+            db,
+            project_id,
+            submission_id,
+            annotator_id=annotator_id,
+        )
+        if item is None:
+            return None
+        return item.model_dump(mode="json")
+
+    def delete_project_task_data(
+        self,
+        db: Session,
+        project_id: int,
+        task_id: str,
+    ) -> None:
+        self.service.delete_task_records(db, project_id, task_id)

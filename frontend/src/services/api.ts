@@ -1,6 +1,8 @@
 import type {
   AdminProjectTaskCreatePayload,
   AdminProjectTaskItem,
+  AuthLoginPayload,
+  AuthSession,
   AdminUserCreatePayload,
   AdminUserItem,
   AdminUserListResult,
@@ -17,6 +19,9 @@ import type {
   PingInfo,
   ProjectItem,
   ProjectListResult,
+  ProjectTaskReviewItem,
+  ProjectTaskReviewSubmitPayload,
+  ProjectTaskReviewTaskDetail,
   SingleTurnSearchCaseSchema,
   SingleTurnSearchCaseAiModelCheckResponse,
   SingleTurnSearchCaseAiReviewPayload,
@@ -29,7 +34,10 @@ import type {
   SingleTurnSearchCaseTaskItem,
   SingleTurnSearchCaseValidationResult,
   SystemInfo,
+  TaskHallListResult,
+  UserSubmissionRecordListResult,
 } from "../types/api";
+import { clearSession, readSession } from "../utils/session";
 
 type ErrorEnvelope = {
   message?: string;
@@ -62,6 +70,12 @@ function resolveErrorMessage(payload: ApiEnvelope<unknown> | ErrorEnvelope | nul
   if (response.status === 404) {
     return "接口不存在或服务尚未完成启动";
   }
+  if (response.status === 401) {
+    return "登录已失效，请重新登录";
+  }
+  if (response.status === 403) {
+    return "当前账号无权访问该内容";
+  }
   if (response.status === 409) {
     return "数据冲突，请检查后重试";
   }
@@ -87,13 +101,17 @@ function ensureArray<T>(value: unknown): T[] {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
+  const session = readSession();
+  const headers = new Headers(init?.headers ?? {});
+  headers.set("Content-Type", "application/json");
+  if (session?.access_token) {
+    headers.set("Authorization", `Bearer ${session.access_token}`);
+  }
+
   try {
     response = await fetch(path, {
-      headers: {
-        "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
-      },
       ...init,
+      headers,
     });
   } catch {
     throw new Error("网络请求失败，请检查前后端服务是否已启动");
@@ -101,6 +119,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   const payload = await parseResponsePayload<T>(response);
   if (!response.ok) {
+    if (response.status === 401) {
+      clearSession();
+      if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+        window.location.replace("/login");
+      }
+    }
     throw new Error(resolveErrorMessage(payload, response));
   }
 
@@ -119,6 +143,23 @@ export function pingSystem() {
   return request<PingInfo>("/api/system/ping");
 }
 
+export function login(payload: AuthLoginPayload) {
+  return request<AuthSession>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function logout() {
+  return request<null>("/api/auth/logout", {
+    method: "POST",
+  });
+}
+
+export function fetchCurrentSessionUser() {
+  return request<AuthSession["user"]>("/api/auth/me");
+}
+
 export function fetchAdminProjects() {
   return request<ProjectListResult>("/api/admin/projects");
 }
@@ -130,7 +171,6 @@ export function fetchAdminProjectDetail(projectId: number) {
 export function publishAdminProject(projectId: number) {
   return request<ProjectItem>(`/api/admin/projects/${projectId}/publish`, {
     method: "PATCH",
-    body: JSON.stringify({}),
   });
 }
 
@@ -152,9 +192,20 @@ export function createAdminProjectTask(projectId: number, payload: AdminProjectT
   });
 }
 
+export function deleteAdminProjectTask(projectId: number, taskId: number) {
+  return request<null>(`/api/admin/projects/${projectId}/tasks/${taskId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function fetchAdminProjectTaskSubmissions(projectId: number, taskId: number, limit = 50) {
   const data = await request<unknown>(`/api/admin/projects/${projectId}/tasks/${taskId}/submissions?limit=${limit}`);
   return ensureArray<ModelResponseReviewSubmissionRecord | SingleTurnSearchCaseSubmissionSummary>(data);
+}
+
+export async function fetchAdminProjectTaskReviews(projectId: number, taskId: number) {
+  const data = await request<unknown>(`/api/admin/projects/${projectId}/tasks/${taskId}/reviews`);
+  return ensureArray<ProjectTaskReviewItem>(data);
 }
 
 export function publishAdminProjectTask(projectId: number, taskId: number) {
@@ -169,12 +220,72 @@ export function unpublishAdminProjectTask(projectId: number, taskId: number) {
   });
 }
 
+export function dispatchAdminProjectTaskReview(projectId: number, taskId: number) {
+  return request<ProjectTaskReviewItem>(`/api/admin/projects/${projectId}/tasks/${taskId}/dispatch-review`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function approveAdminProjectTask(projectId: number, taskId: number) {
+  return request<AdminProjectTaskItem>(`/api/admin/projects/${projectId}/tasks/${taskId}/approve`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export function fetchMyProjects() {
   return request<ProjectListResult>("/api/me/projects");
 }
 
+export function fetchMyTaskHall() {
+  return request<TaskHallListResult>("/api/me/projects/hall");
+}
+
+export function fetchMyReviewProjects() {
+  return request<ProjectListResult>("/api/me/projects/review/queue");
+}
+
+export function fetchMySubmissionRecords() {
+  return request<UserSubmissionRecordListResult>("/api/me/projects/submission-records");
+}
+
 export function fetchMyProjectDetail(projectId: number) {
   return request<ProjectItem>(`/api/me/projects/${projectId}`);
+}
+
+export async function claimMyProjectAnnotationTask(projectId: number) {
+  const data = await request<AdminProjectTaskItem | null>(`/api/me/projects/${projectId}/annotation-task/claim`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  return data && typeof data === "object" ? data : null;
+}
+
+export function releaseMyProjectAnnotationTask(projectId: number) {
+  return request<null>(`/api/me/projects/${projectId}/annotation-task/release`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function claimMyProjectReviewTask(projectId: number) {
+  const data = await request<ProjectTaskReviewTaskDetail | null>(`/api/me/projects/${projectId}/review-task/claim`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  return data && typeof data === "object" ? data : null;
+}
+
+export function submitMyProjectReviewTask(
+  projectId: number,
+  reviewId: number,
+  payload: ProjectTaskReviewSubmitPayload,
+) {
+  return request<ProjectTaskReviewItem>(`/api/me/projects/${projectId}/review-task/${reviewId}/submit`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function fetchModelResponseReviewSchema() {
@@ -204,9 +315,37 @@ export async function fetchModelResponseReviewCurrentTask(projectId: number) {
   return data && typeof data === "object" ? data : null;
 }
 
+export async function fetchModelResponseReviewMySubmissionDetail(projectId: number, taskId: string) {
+  const data = await request<ModelResponseReviewSubmissionRecord | null>(
+    `/api/plugins/model_response_review/projects/${projectId}/tasks/${encodeURIComponent(taskId)}/submission-detail`,
+  );
+  return data && typeof data === "object" ? data : null;
+}
+
+export async function fetchModelResponseReviewMySubmissionDetailById(projectId: number, submissionId: number) {
+  const data = await request<ModelResponseReviewSubmissionRecord | null>(
+    `/api/plugins/model_response_review/projects/${projectId}/records/${submissionId}`,
+  );
+  return data && typeof data === "object" ? data : null;
+}
+
 export async function fetchSingleTurnSearchCaseCurrentTask(projectId: number) {
   const data = await request<SingleTurnSearchCaseTaskItem | null>(
     `/api/plugins/single_turn_search_case/projects/${projectId}/current-task`,
+  );
+  return data && typeof data === "object" ? data : null;
+}
+
+export async function fetchSingleTurnSearchCaseMySubmissionDetail(projectId: number, taskId: string) {
+  const data = await request<SingleTurnSearchCaseSubmissionDetail | null>(
+    `/api/plugins/single_turn_search_case/projects/${projectId}/tasks/${encodeURIComponent(taskId)}/submission-detail`,
+  );
+  return data && typeof data === "object" ? data : null;
+}
+
+export async function fetchSingleTurnSearchCaseMySubmissionDetailById(projectId: number, submissionId: number) {
+  const data = await request<SingleTurnSearchCaseSubmissionDetail | null>(
+    `/api/plugins/single_turn_search_case/projects/${projectId}/records/${submissionId}`,
   );
   return data && typeof data === "object" ? data : null;
 }

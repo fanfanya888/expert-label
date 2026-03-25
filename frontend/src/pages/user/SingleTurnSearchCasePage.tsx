@@ -1,4 +1,5 @@
 import {
+  ArrowLeftOutlined,
   InfoCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -23,16 +24,17 @@ import {
   Tag,
   Typography,
   Upload,
+  Popconfirm,
   message,
 } from "antd";
 import type { UploadFile } from "antd/es/upload/interface";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 import {
   fetchSingleTurnSearchCaseCurrentTask,
-  fetchSingleTurnSearchCaseProjectStats,
   fetchSingleTurnSearchCaseSchema,
+  releaseMyProjectAnnotationTask,
   reviewSingleTurnSearchCaseModelAWithAi,
   reviewSingleTurnSearchCaseModelBWithAi,
   reviewSingleTurnSearchCaseRuleDefinitionWithAi,
@@ -56,6 +58,7 @@ import type {
   SingleTurnSearchCaseSubmissionResult,
   SingleTurnSearchCaseTaskItem,
 } from "../../types/api";
+import { readSession } from "../../utils/session";
 
 interface SearchCaseRuleFormItem {
   rule_category: string;
@@ -557,16 +560,18 @@ function renderModelCheckResult(
 }
 
 export function SingleTurnSearchCasePage() {
+  const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const projectIdNumber = useMemo(() => Number(projectId), [projectId]);
   const [form] = Form.useForm<SearchCaseFormValues>();
   const [schema, setSchema] = useState<SingleTurnSearchCaseSchema | null>(null);
-  const [stats, setStats] = useState<{ total_tasks: number; completed_tasks: number; pending_tasks: number } | null>(null);
+  const stats = { completed_tasks: 0, total_tasks: 0 };
   const [currentTask, setCurrentTask] = useState<SingleTurnSearchCaseTaskItem | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [releasing, setReleasing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [lastSubmission, setLastSubmission] = useState<SingleTurnSearchCaseSubmissionResult | null>(null);
+  const [lastSubmission] = useState<SingleTurnSearchCaseSubmissionResult | null>(null);
   const [ruleDefinitionReviews, setRuleDefinitionReviews] = useState<Record<number, AiReviewState<SingleTurnSearchCaseAiRuleCheckResponse>>>({});
   const [modelAReviews, setModelAReviews] = useState<Record<number, AiReviewState<SingleTurnSearchCaseAiModelCheckResponse>>>({});
   const [modelBReviews, setModelBReviews] = useState<Record<number, AiReviewState<SingleTurnSearchCaseAiModelCheckResponse>>>({});
@@ -581,10 +586,8 @@ export function SingleTurnSearchCasePage() {
 
   const resetPageState = () => {
     setSchema(DEFAULT_SEARCH_CASE_SCHEMA);
-    setStats(null);
     setCurrentTask(null);
     setLoadError(null);
-    setLastSubmission(null);
     setRuleDefinitionReviews({});
     setModelAReviews({});
     setModelBReviews({});
@@ -601,15 +604,11 @@ export function SingleTurnSearchCasePage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [statsData, taskData] = await Promise.all([
-        fetchSingleTurnSearchCaseProjectStats(projectIdNumber),
-        fetchSingleTurnSearchCaseCurrentTask(projectIdNumber),
-      ]);
+      const taskData = await fetchSingleTurnSearchCaseCurrentTask(projectIdNumber);
       if (requestId !== requestIdRef.current) {
         return;
       }
 
-      setStats(statsData);
       setCurrentTask(taskData);
 
       if (taskData) {
@@ -824,6 +823,25 @@ export function SingleTurnSearchCasePage() {
     await handleRuleDefinitionReview(ruleIndex);
   };
 
+  const handleRelease = async () => {
+    if (Number.isNaN(projectIdNumber) || projectIdNumber <= 0) {
+      message.error("项目参数不正确");
+      return;
+    }
+
+    setReleasing(true);
+    try {
+      await releaseMyProjectAnnotationTask(projectIdNumber);
+      message.success("已放弃当前任务，题目已回到任务池");
+      navigate("/user/annotation-tasks", { replace: true });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "放弃当前任务失败";
+      message.error(errorMessage);
+    } finally {
+      setReleasing(false);
+    }
+  };
+
   const handleSubmit = async (values: SearchCaseFormValues) => {
     if (!currentTask || Number.isNaN(projectIdNumber) || projectIdNumber <= 0) {
       message.error("当前没有可提交的任务模板");
@@ -867,7 +885,7 @@ export function SingleTurnSearchCasePage() {
     const payload: SingleTurnSearchCaseSubmissionPayload = {
       project_id: projectIdNumber,
       task_id: currentTask.task_id,
-      annotator_id: null,
+      annotator_id: readSession()?.user.id ?? null,
       domain: values.domain,
       scenario_description: values.scenario_description,
       prompt: values.prompt,
@@ -888,10 +906,9 @@ export function SingleTurnSearchCasePage() {
         message.error(firstIssue ? mapFirstValidationError(firstIssue.field) : "提交内容未通过校验");
         return;
       }
-      const result = await submitSingleTurnSearchCaseSubmission(projectIdNumber, payload);
-      setLastSubmission(result);
+      await submitSingleTurnSearchCaseSubmission(projectIdNumber, payload);
       message.success("Case 已提交");
-      await loadPageData({ silent: true });
+      navigate("/user/annotation-tasks", { replace: true });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "提交 case 失败";
       message.error(errorMessage);
@@ -910,9 +927,25 @@ export function SingleTurnSearchCasePage() {
             className="search-case-card"
             title="作业说明区"
             extra={
-              <Button icon={<ReloadOutlined />} onClick={() => void loadPageData()} loading={loading}>
+              <Space wrap>
+                <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/user/annotation-tasks")}>
+                  退出当前界面
+                </Button>
+                <Popconfirm
+                  title="确定放弃当前任务吗？"
+                  description="放弃后，当前题目会回到任务池，其他人也可以继续领取。"
+                  okText="确定放弃"
+                  cancelText="取消"
+                  onConfirm={() => void handleRelease()}
+                >
+                  <Button danger loading={releasing} disabled={!currentTask}>
+                    放弃当前任务
+                  </Button>
+                </Popconfirm>
+                <Button icon={<ReloadOutlined />} onClick={() => void loadPageData()} loading={loading}>
                 刷新任务
-              </Button>
+                </Button>
+              </Space>
             }
           >
             {currentTask ? (
@@ -934,7 +967,7 @@ export function SingleTurnSearchCasePage() {
                     description="建议选择真实、日常、带弱时效性的搜索场景；避免纯知识题、极强时效题和答案边界无法穷举的开放题。"
                   />
                 ) : null}
-                <Space wrap>
+                <Space wrap style={{ display: "none" }}>
                   <Tag color="blue">{`模板规则范围 ${currentTask.scoring_rules_min}-${currentTask.scoring_rules_max}`}</Tag>
                   <Tag color="gold">{`最少扣分项 ${currentTask.min_penalty_rules}`}</Tag>
                   <Tag>{`进度 ${stats?.completed_tasks ?? 0}/${stats?.total_tasks ?? 0}`}</Tag>

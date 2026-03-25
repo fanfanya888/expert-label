@@ -1,8 +1,13 @@
 {
-  "name": "workspace-dev",
+  "name": "expert-label-workspace",
   "private": true,
+  "description": "Root scripts for the Expert Label workspace",
   "scripts": {
-    "dev": "docker compose up -d && concurrently -n BACKEND,FRONTEND \"cd backend && alembic upgrade head && uvicorn app.main:app --reload --host 127.0.0.1 --port 8000\" \"cd frontend && npm run dev -- --host 127.0.0.1 --port 5173\""
+    "setup:frontend": "npm install --prefix frontend",
+    "dev": "docker compose up -d && concurrently -n BACKEND,FRONTEND \"cd backend && alembic upgrade head && uvicorn app.main:app --reload --host 127.0.0.1 --port 8000\" \"cd frontend && npm run dev -- --host 127.0.0.1 --port 5173\"",
+    "dev:backend": "cd backend && alembic upgrade head && uvicorn app.main:app --reload --host 127.0.0.1 --port 8000",
+    "dev:frontend": "cd frontend && npm run dev -- --host 127.0.0.1 --port 5173",
+    "build:frontend": "cd frontend && npm run build"
   },
   "devDependencies": {
     "concurrently": "^9.0.0"

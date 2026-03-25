@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.task_workflow import (
+    TASK_COMPLETED_STATUSES,
+    TASK_STATUS_ANNOTATION_IN_PROGRESS,
+    TASK_STATUS_APPROVED,
+    TASK_STATUS_PENDING_REVIEW_DISPATCH,
+)
+from app.crud.project_tasks import claim_annotation_task
 from app.models.model_response_review import ModelResponseReviewRecord
 from app.models.project import Project
 from app.models.project_task import ProjectTask
@@ -91,7 +99,7 @@ class ModelResponseReviewService:
                     ProjectTask.plugin_code == self.plugin_code,
                     ProjectTask.publish_status == "published",
                     ProjectTask.is_visible.is_(True),
-                    ProjectTask.task_status == "completed",
+                    ProjectTask.task_status.in_(TASK_COMPLETED_STATUSES),
                 )
             )
             or 0
@@ -103,18 +111,13 @@ class ModelResponseReviewService:
             pending_tasks=max(int(total) - int(completed), 0),
         )
 
-    def get_current_task(self, db: Session, project_id: int) -> ModelResponseReviewTaskRead | None:
+    def get_current_task(self, db: Session, project_id: int, user_id: int) -> ModelResponseReviewTaskRead | None:
         self.get_project_or_raise(db, project_id)
-        task = db.scalar(
-            select(ProjectTask)
-            .where(
-                ProjectTask.project_id == project_id,
-                ProjectTask.plugin_code == self.plugin_code,
-                ProjectTask.publish_status == "published",
-                ProjectTask.is_visible.is_(True),
-                ProjectTask.task_status == "pending",
-            )
-            .order_by(ProjectTask.published_at.asc().nullslast(), ProjectTask.id.asc())
+        task = claim_annotation_task(
+            db,
+            project_id=project_id,
+            plugin_code=self.plugin_code,
+            user_id=user_id,
         )
         if task is None:
             return None
@@ -132,7 +135,7 @@ class ModelResponseReviewService:
         task = self._get_task_or_raise(db, project_id, task_id)
         if task.publish_status != "published" or not task.is_visible:
             raise ValueError("task is not published")
-        if task.task_status == "completed":
+        if task.task_status == TASK_STATUS_APPROVED:
             raise ValueError("task has already been completed")
 
         payload = ModelResponseReviewTaskPayload.model_validate(task.task_payload)
@@ -230,13 +233,24 @@ class ModelResponseReviewService:
                 ],
             )
 
-        if task.task_status == "completed":
+        if task.task_status != TASK_STATUS_ANNOTATION_IN_PROGRESS:
             return ModelResponseReviewValidationResult(
                 valid=False,
                 errors=[
                     ModelResponseReviewValidationIssue(
                         field="task_id",
-                        message="task has already been completed",
+                        message="task is not assigned for annotation",
+                    )
+                ],
+            )
+
+        if task.annotation_assignee_id != normalized.annotator_id:
+            return ModelResponseReviewValidationResult(
+                valid=False,
+                errors=[
+                    ModelResponseReviewValidationIssue(
+                        field="annotator_id",
+                        message="task belongs to another annotator",
                     )
                 ],
             )
@@ -298,7 +312,8 @@ class ModelResponseReviewService:
         )
         db.add(record)
 
-        task.task_status = "completed"
+        task.task_status = TASK_STATUS_PENDING_REVIEW_DISPATCH
+        task.annotation_submitted_at = datetime.now(timezone.utc)
         db.add(task)
 
         db.commit()
@@ -322,6 +337,7 @@ class ModelResponseReviewService:
         *,
         limit: int = 20,
         task_id: str | None = None,
+        annotator_id: int | None = None,
         require_published: bool = True,
     ) -> list[ModelResponseReviewSubmissionRecord]:
         self.get_project_or_raise(db, project_id, require_published=require_published)
@@ -332,6 +348,8 @@ class ModelResponseReviewService:
         )
         if task_id:
             statement = statement.where(ModelResponseReviewRecord.task_id == task_id)
+        if annotator_id is not None:
+            statement = statement.where(ModelResponseReviewRecord.annotator_id == annotator_id)
         statement = statement.limit(limit)
 
         items = list(db.scalars(statement).all())
@@ -354,6 +372,73 @@ class ModelResponseReviewService:
             )
             for item in items
         ]
+
+    def get_task_submission_detail(
+        self,
+        db: Session,
+        project_id: int,
+        task_id: str,
+        *,
+        annotator_id: int,
+    ) -> ModelResponseReviewSubmissionRecord | None:
+        items = self.list_submission_records(
+            db,
+            project_id,
+            limit=1,
+            task_id=task_id,
+            annotator_id=annotator_id,
+            require_published=False,
+        )
+        if not items:
+            return None
+        return items[0]
+
+    def get_submission_detail(
+        self,
+        db: Session,
+        project_id: int,
+        submission_id: int,
+        *,
+        annotator_id: int,
+    ) -> ModelResponseReviewSubmissionRecord | None:
+        self.get_project_or_raise(db, project_id, require_published=False)
+        item = db.scalar(
+            select(ModelResponseReviewRecord).where(
+                ModelResponseReviewRecord.project_id == project_id,
+                ModelResponseReviewRecord.id == submission_id,
+                ModelResponseReviewRecord.annotator_id == annotator_id,
+            )
+        )
+        if item is None:
+            return None
+        return ModelResponseReviewSubmissionRecord(
+            submission_id=item.id,
+            project_id=item.project_id,
+            task_id=item.task_id,
+            annotator_id=item.annotator_id,
+            task_category=item.task_category,
+            answer_rating=item.answer_rating,
+            rating_reason=item.rating_reason,
+            prompt_snapshot=item.prompt_snapshot,
+            model_reply_snapshot=item.model_reply_snapshot,
+            rubric_version=item.rubric_version,
+            metadata=item.record_metadata,
+            plugin_code=item.plugin_code,
+            plugin_version=item.plugin_version,
+            submitted_at=item.submitted_at,
+        )
+
+    def delete_task_records(self, db: Session, project_id: int, task_id: str) -> None:
+        self.get_project_or_raise(db, project_id, require_published=False)
+        rows = db.scalars(
+            select(ModelResponseReviewRecord).where(
+                ModelResponseReviewRecord.project_id == project_id,
+                ModelResponseReviewRecord.task_id == task_id,
+            )
+        ).all()
+        for row in rows:
+            db.delete(row)
+        db.flush()
 
     def get_rubric_snapshot(self) -> dict[str, Any]:
         return get_review_rubric()

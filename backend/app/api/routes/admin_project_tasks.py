@@ -5,21 +5,37 @@ from typing import Any, cast
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.api.deps import require_admin_user
 from app.core.response import build_response, serialize_schema
+from app.crud.project_task_reviews import (
+    approve_project_task,
+    build_project_task_review_payload,
+    create_review_round,
+    delete_task_reviews,
+    list_task_reviews,
+)
 from app.crud.project_tasks import (
+    build_project_task_payload,
     create_project_task,
+    delete_project_task,
     get_project_task_by_external_id,
     get_project_task_by_id,
+    get_project_task_review_stats_map,
     list_project_tasks,
     publish_project_task,
     unpublish_project_task,
 )
 from app.crud.projects import get_project_by_id
+from app.crud.users import get_usernames_map
 from app.db.session import get_db
 from app.plugins.registrar import get_plugin_registry
-from app.schemas.project_task import ProjectTaskCreate, ProjectTaskRead
+from app.schemas.project_task import ProjectTaskCreate, ProjectTaskRead, ProjectTaskReviewRead
 
-router = APIRouter(prefix="/admin/projects/{project_id}/tasks", tags=["admin-project-tasks"])
+router = APIRouter(
+    prefix="/admin/projects/{project_id}/tasks",
+    tags=["admin-project-tasks"],
+    dependencies=[Depends(require_admin_user)],
+)
 
 
 def _get_project_or_404(db: Session, project_id: int):
@@ -27,6 +43,64 @@ def _get_project_or_404(db: Session, project_id: int):
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
     return project
+
+
+def _build_task_read(
+    db: Session,
+    task,
+    *,
+    review_stats: dict[str, int | str | None] | None = None,
+) -> ProjectTaskRead:
+    payload = review_stats or {}
+    latest_reviewer_id = payload.get("latest_reviewer_id")
+    latest_reviewer_id_value = int(latest_reviewer_id) if latest_reviewer_id is not None else None
+
+    username_map = get_usernames_map(
+        db,
+        [
+            user_id
+            for user_id in [
+                task.annotation_assignee_id,
+                latest_reviewer_id_value,
+            ]
+            if user_id is not None
+        ],
+    )
+
+    return ProjectTaskRead.model_validate(
+        build_project_task_payload(
+            task,
+            review_round_count=int(payload.get("review_round_count", 0)),
+            latest_reviewer_id=latest_reviewer_id_value,
+            latest_reviewer_username=(
+                username_map.get(latest_reviewer_id_value)
+                if latest_reviewer_id_value is not None
+                else None
+            ),
+            latest_review_status=(
+                str(payload["latest_review_status"])
+                if payload.get("latest_review_status") is not None
+                else None
+            ),
+            annotation_assignee_username=(
+                username_map.get(task.annotation_assignee_id)
+                if task.annotation_assignee_id is not None
+                else None
+            ),
+        )
+    )
+
+
+def _build_review_read(db: Session, review) -> ProjectTaskReviewRead:
+    reviewer_username = None
+    if review.reviewer_id is not None:
+        reviewer_username = get_usernames_map(db, [review.reviewer_id]).get(review.reviewer_id)
+    return ProjectTaskReviewRead.model_validate(
+        build_project_task_review_payload(
+            review,
+            reviewer_username=reviewer_username,
+        )
+    )
 
 
 @router.get("")
@@ -41,7 +115,15 @@ def list_admin_project_tasks(
         return build_response(data=[])
 
     items, _ = list_project_tasks(db, project_id, skip=skip, limit=limit)
-    data = [ProjectTaskRead.model_validate(item) for item in items]
+    review_stats_map = get_project_task_review_stats_map(db, [item.id for item in items])
+    data = [
+        _build_task_read(
+            db,
+            item,
+            review_stats=review_stats_map.get(item.id),
+        )
+        for item in items
+    ]
     return build_response(data=serialize_schema(data))
 
 
@@ -74,8 +156,29 @@ def create_admin_project_task(
         external_task_id=normalized_external_task_id,
         task_payload=normalized_payload,
     )
-    data = ProjectTaskRead.model_validate(task)
+    data = _build_task_read(db, task)
     return build_response(message="任务已创建", data=serialize_schema(data))
+
+
+@router.delete("/{task_id}")
+def delete_admin_project_task(
+    project_id: int,
+    task_id: int,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    project = _get_project_or_404(db, project_id)
+    task = get_project_task_by_id(db, project_id, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    plugin = get_plugin_registry().get(project.plugin_code or "")
+    if plugin is not None and hasattr(plugin, "delete_project_task_data"):
+        delete_plugin = cast(Any, plugin)
+        delete_plugin.delete_project_task_data(db, project.id, task.external_task_id)
+
+    delete_task_reviews(db, task.id)
+    delete_project_task(db, task)
+    return build_response(message="任务已删除", data=None)
 
 
 @router.get("/{task_id}/submissions")
@@ -119,7 +222,8 @@ def publish_admin_project_task(
         raise HTTPException(status_code=422, detail="任务不存在")
 
     updated_task = publish_project_task(db, task)
-    data = ProjectTaskRead.model_validate(updated_task)
+    review_stats = get_project_task_review_stats_map(db, [updated_task.id]).get(updated_task.id)
+    data = _build_task_read(db, updated_task, review_stats=review_stats)
     return build_response(message="任务已发布", data=serialize_schema(data))
 
 
@@ -135,5 +239,77 @@ def unpublish_admin_project_task(
         raise HTTPException(status_code=422, detail="任务不存在")
 
     updated_task = unpublish_project_task(db, task)
-    data = ProjectTaskRead.model_validate(updated_task)
+    review_stats = get_project_task_review_stats_map(db, [updated_task.id]).get(updated_task.id)
+    data = _build_task_read(db, updated_task, review_stats=review_stats)
     return build_response(message="任务已下线", data=serialize_schema(data))
+
+
+@router.post("/{task_id}/dispatch-review")
+def dispatch_admin_project_task_review(
+    project_id: int,
+    task_id: int,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    _get_project_or_404(db, project_id)
+    task = get_project_task_by_id(db, project_id, task_id)
+    if task is None:
+        raise HTTPException(status_code=422, detail="任务不存在")
+
+    try:
+        review = create_review_round(db, task)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    data = _build_review_read(db, review)
+    return build_response(message="质检任务已发出", data=serialize_schema(data))
+
+
+@router.post("/{task_id}/approve")
+def approve_admin_project_task(
+    project_id: int,
+    task_id: int,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    _get_project_or_404(db, project_id)
+    task = get_project_task_by_id(db, project_id, task_id)
+    if task is None:
+        raise HTTPException(status_code=422, detail="任务不存在")
+
+    try:
+        approved_task = approve_project_task(db, task)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    review_stats = get_project_task_review_stats_map(db, [approved_task.id]).get(approved_task.id)
+    data = _build_task_read(db, approved_task, review_stats=review_stats)
+    return build_response(message="任务已通过", data=serialize_schema(data))
+
+
+@router.get("/{task_id}/reviews")
+def list_admin_project_task_reviews(
+    project_id: int,
+    task_id: int,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    _get_project_or_404(db, project_id)
+    task = get_project_task_by_id(db, project_id, task_id)
+    if task is None:
+        return build_response(data=[])
+
+    items = list_task_reviews(db, task.id)
+    reviewer_ids = [item.reviewer_id for item in items if item.reviewer_id is not None]
+    username_map = get_usernames_map(db, reviewer_ids)
+    data = [
+        ProjectTaskReviewRead.model_validate(
+            build_project_task_review_payload(
+                item,
+                reviewer_username=(
+                    username_map.get(item.reviewer_id)
+                    if item.reviewer_id is not None
+                    else None
+                ),
+            )
+        )
+        for item in items
+    ]
+    return build_response(data=serialize_schema(data))

@@ -2,9 +2,9 @@ import { DatabaseOutlined, DeploymentUnitOutlined, ThunderboltOutlined } from "@
 import { Card, Col, List, Row, Space, Statistic, Tag, Typography } from "antd";
 
 const quickItems = [
-  "管理端支持查看微服务项目、发布和下线。",
-  "用户端只展示已发布项目，并提供统一进入标注入口。",
-  "当前阶段不实现认证闭环、标注流程编排和 LLM 接入。",
+  "管理端支持项目发布、任务流转和账号权限管理。",
+  "用户端按标注任务和质检任务拆分工作入口。",
+  "平台当前已具备真实登录、共享任务池和多轮质检基础闭环。",
 ];
 
 export function DashboardPage() {
@@ -35,8 +35,8 @@ export function DashboardPage() {
         <Col xs={24} xl={15}>
           <Card title="平台概览" className="panel-card">
             <Typography.Paragraph>
-              当前平台聚焦“微服务项目的发布管理中心”。标注项目由外部微服务创建并接入，
-              本平台负责展示项目、发布与下线控制，以及用户端可见性管理。
+              当前平台聚焦专家标注任务的统一分发和质检闭环。
+              管理端负责项目发布、任务池调度和多轮质检，用户端负责试标和质检执行。
             </Typography.Paragraph>
           </Card>
         </Col>

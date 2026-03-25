@@ -121,8 +121,8 @@ export function ProjectWorkspacePage() {
           </Space>
         ) : (
           <Space direction="vertical" size={20} style={{ width: "100%" }}>
-            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/user/projects")}>
-              返回我的项目
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/user/annotation-tasks")}>
+              返回标注任务
             </Button>
 
             <div>

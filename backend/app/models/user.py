@@ -15,11 +15,12 @@ class User(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(
         String(32),
         index=True,
-        default="annotator",
-        server_default=sa.text("'annotator'"),
+        default="user",
+        server_default=sa.text("'user'"),
     )
     is_active: Mapped[bool] = mapped_column(
         Boolean,
@@ -30,6 +31,27 @@ class User(TimestampMixin, Base):
     last_login_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
+    )
+    session_token_hash: Mapped[str | None] = mapped_column(
+        String(64),
+        index=True,
+        nullable=True,
+    )
+    session_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    can_annotate: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=sa.true(),
+    )
+    can_review: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=sa.false(),
     )
 
     projects: Mapped[list["Project"]] = relationship(

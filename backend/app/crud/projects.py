@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.task_workflow import TASK_COMPLETED_STATUSES
 from app.models.project import Project
 from app.models.project_task import ProjectTask
 from app.models.user import User
@@ -101,7 +102,7 @@ def get_project_task_stats_map(
     if not project_ids:
         return {}
 
-    completed_case = case((ProjectTask.task_status == "completed", 1), else_=0)
+    completed_case = case((ProjectTask.task_status.in_(TASK_COMPLETED_STATUSES), 1), else_=0)
     filters = [ProjectTask.project_id.in_(project_ids)]
     if visible_only:
         filters.extend(

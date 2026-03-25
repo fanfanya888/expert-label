@@ -5,12 +5,13 @@ import type { ReactNode } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import {
-  clearMockSession,
+  clearSession,
   getPortalLabel,
   getRoleLabel,
-  readMockSession,
+  readSession,
   type PortalArea,
-} from "../utils/mockSession";
+} from "../utils/session";
+import { logout } from "../services/api";
 
 const { Header, Content, Sider } = Layout;
 
@@ -41,14 +42,20 @@ export function ConsoleLayout({
 }: ConsoleLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const session = readMockSession();
+  const session = readSession();
   const selectedKey =
     menuItems.find((item) => location.pathname.startsWith(item.key))?.key ?? defaultKey;
   const pageTitle = pageTitles[selectedKey] ?? "平台";
 
-  const handleLogout = () => {
-    clearMockSession();
-    navigate("/login", { replace: true });
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // Ignore logout request failures and clear local session anyway.
+    } finally {
+      clearSession();
+      navigate("/login", { replace: true });
+    }
   };
 
   return (
@@ -78,12 +85,12 @@ export function ConsoleLayout({
           </Space>
           <Space size={12} wrap>
             <Tag color={portal === "admin" ? "blue" : "green"}>{getPortalLabel(portal)}</Tag>
-            {session ? <Tag>{getRoleLabel(session.role)}</Tag> : null}
-            {session?.username ? (
-              <Typography.Text type="secondary">{session.username}</Typography.Text>
+            {session ? <Tag>{getRoleLabel(session.user.role)}</Tag> : null}
+            {session?.user.username ? (
+              <Typography.Text type="secondary">{session.user.username}</Typography.Text>
             ) : null}
             <Tag>{badgeText}</Tag>
-            <Button icon={<LogoutOutlined />} onClick={handleLogout}>
+            <Button icon={<LogoutOutlined />} onClick={() => void handleLogout()}>
               退出登录
             </Button>
           </Space>
