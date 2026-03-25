@@ -95,40 +95,6 @@ class SingleTurnSearchCasePlugin(AnnotationPlugin):
             )
         ]
 
-    def list_admin_submissions(
-        self,
-        db: Session,
-        project_id: int,
-        limit: int = 100,
-        task_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        return [
-            item.model_dump(mode="json")
-            for item in self.service.list_submission_summaries(
-                db,
-                project_id,
-                limit=limit,
-                task_id=task_id,
-                require_published=False,
-            )
-        ]
-
-    def get_admin_submission_detail(
-        self,
-        db: Session,
-        project_id: int,
-        submission_id: int,
-    ) -> dict[str, Any] | None:
-        detail = self.service.get_submission_detail(
-            db,
-            project_id,
-            submission_id,
-            require_published=False,
-        )
-        if detail is None:
-            return None
-        return detail.model_dump(mode="json")
-
     def get_latest_task_submission_detail(
         self,
         db: Session,

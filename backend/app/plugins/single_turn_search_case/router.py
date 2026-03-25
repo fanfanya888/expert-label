@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_admin_user, require_annotator_user
+from app.api.deps import require_annotator_user
 from app.core.response import build_response
 from app.db.session import get_db
 from app.models.user import User
@@ -186,37 +186,3 @@ def create_submission(
     data = plugin.save_project_submission(db, project_id, validated_payload)
     return build_response(message="Case 已提交", data=data)
 
-
-@router.get("/admin/projects/{project_id}/records")
-def list_admin_records(
-    project_id: int,
-    limit: int = Query(default=100, ge=1, le=200),
-    task_id: str | None = Query(default=None),
-    current_user: User = Depends(require_admin_user),
-    db: Session = Depends(get_db),
-    plugin: SingleTurnSearchCasePlugin = Depends(get_single_turn_search_case_plugin),
-) -> dict[str, object]:
-    _ = current_user
-    try:
-        data = plugin.list_admin_submissions(db, project_id, limit=limit, task_id=task_id)
-    except ValueError:
-        data = []
-    return build_response(data=data)
-
-
-@router.get("/admin/projects/{project_id}/records/{submission_id}")
-def get_admin_record_detail(
-    project_id: int,
-    submission_id: int,
-    current_user: User = Depends(require_admin_user),
-    db: Session = Depends(get_db),
-    plugin: SingleTurnSearchCasePlugin = Depends(get_single_turn_search_case_plugin),
-) -> dict[str, object]:
-    _ = current_user
-    try:
-        detail = plugin.get_admin_submission_detail(db, project_id, submission_id)
-    except ValueError:
-        detail = None
-    if detail is None:
-        raise HTTPException(status_code=404, detail="提交记录不存在")
-    return build_response(data=detail)

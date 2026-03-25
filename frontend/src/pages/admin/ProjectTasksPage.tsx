@@ -1,7 +1,6 @@
 import {
   ArrowLeftOutlined,
   CheckCircleOutlined,
-  FileSearchOutlined,
   PlusOutlined,
   ReloadOutlined,
   StopOutlined,
@@ -36,6 +35,7 @@ import {
   deleteAdminProjectTask,
   dispatchAdminProjectTaskReview,
   fetchAdminProjectDetail,
+  fetchAdminProjectTaskReviewDetail,
   fetchAdminProjectTaskReviews,
   fetchAdminProjectTasks,
   fetchModelResponseReviewSchema,
@@ -50,9 +50,11 @@ import type {
   ModelResponseReviewTaskTemplatePayload,
   ProjectItem,
   ProjectTaskReviewItem,
+  ProjectTaskReviewTaskDetail,
   SingleTurnSearchCaseSchema,
   SingleTurnSearchCaseTaskTemplatePayload,
 } from "../../types/api";
+import { AdminProjectTaskReviewDetailDrawer } from "./AdminProjectTaskReviewDetailDrawer";
 
 interface ModelResponseReviewTaskFormValues {
   task_category?: string;
@@ -197,6 +199,9 @@ export function ProjectTasksPage() {
   const [reviewDrawerTask, setReviewDrawerTask] = useState<AdminProjectTaskItem | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewItems, setReviewItems] = useState<ProjectTaskReviewItem[]>([]);
+  const [reviewDetailOpen, setReviewDetailOpen] = useState(false);
+  const [reviewDetailLoading, setReviewDetailLoading] = useState(false);
+  const [reviewDetail, setReviewDetail] = useState<ProjectTaskReviewTaskDetail | null>(null);
   const requestIdRef = useRef(0);
 
   const isModelResponseReview = project?.plugin_code === "model_response_review";
@@ -231,6 +236,8 @@ export function ProjectTasksPage() {
     setReviewDrawerTask(null);
     setReviewItems([]);
     setReviewDrawerOpen(false);
+    setReviewDetailOpen(false);
+    setReviewDetail(null);
     modelResponseForm.resetFields();
     searchCaseForm.resetFields();
   };
@@ -434,6 +441,8 @@ export function ProjectTasksPage() {
     setReviewDrawerTask(task);
     setReviewDrawerOpen(true);
     setReviewLoading(true);
+    setReviewDetailOpen(false);
+    setReviewDetail(null);
     try {
       setReviewItems(await fetchAdminProjectTaskReviews(projectIdNumber, task.id));
     } catch (error) {
@@ -441,6 +450,21 @@ export function ProjectTasksPage() {
       message.error(error instanceof Error ? error.message : "获取质检记录失败");
     } finally {
       setReviewLoading(false);
+    }
+  };
+
+  const openReviewDetail = async (task: AdminProjectTaskItem, review: ProjectTaskReviewItem) => {
+    setReviewDetailOpen(true);
+    setReviewDetailLoading(true);
+    setReviewDetail(null);
+    try {
+      const data = await fetchAdminProjectTaskReviewDetail(projectIdNumber, task.id, review.id);
+      setReviewDetail(data);
+    } catch (error) {
+      setReviewDetail(null);
+      message.error(error instanceof Error ? error.message : "获取质检详情失败");
+    } finally {
+      setReviewDetailLoading(false);
     }
   };
 
@@ -563,7 +587,6 @@ export function ProjectTasksPage() {
         extra={
           <Space>
             <Button icon={<ReloadOutlined />} onClick={() => void loadPageData()} loading={loading}>刷新</Button>
-            {isSearchCase ? <Button icon={<FileSearchOutlined />} disabled={!project} onClick={() => navigate(`/admin/projects/${projectIdNumber}/search-case-results`)}>查看提交结果</Button> : null}
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal} disabled={!project || !isSupportedProject || loading}>{isSearchCase ? "新建模板" : "新建任务"}</Button>
           </Space>
         }
@@ -641,7 +664,7 @@ export function ProjectTasksPage() {
         )}
       </Modal>
 
-      <Drawer title={reviewDrawerTask ? `质检记录 / ${getTaskLabel(reviewDrawerTask)}` : "质检记录"} width={860} open={reviewDrawerOpen} onClose={() => { setReviewDrawerOpen(false); setReviewDrawerTask(null); setReviewItems([]); }}>
+      <Drawer title={reviewDrawerTask ? `质检记录 / ${getTaskLabel(reviewDrawerTask)}` : "质检记录"} width={860} open={reviewDrawerOpen} onClose={() => { setReviewDrawerOpen(false); setReviewDrawerTask(null); setReviewItems([]); setReviewDetailOpen(false); setReviewDetail(null); }}>
         {reviewDrawerTask ? (
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
             <Descriptions column={1} bordered size="small">
@@ -665,12 +688,43 @@ export function ProjectTasksPage() {
                 { title: "状态", width: 120, render: (_: unknown, record: ProjectTaskReviewItem) => { const meta = getReviewMeta(record.review_status); return meta ? <Tag color={meta.color}>{meta.label}</Tag> : "-"; } },
                 { title: "结论", width: 120, render: (_: unknown, record: ProjectTaskReviewItem) => record.review_result || "-" },
                 { title: "提交时间", width: 180, render: (_: unknown, record: ProjectTaskReviewItem) => formatDateTime(record.submitted_at) },
-                { title: "备注", render: (_: unknown, record: ProjectTaskReviewItem) => <Typography.Paragraph style={{ marginBottom: 0 }} ellipsis={{ rows: 3, expandable: true }}>{record.review_comment || "-"}</Typography.Paragraph> },
+                {
+                  title: "备注",
+                  render: (_: unknown, record: ProjectTaskReviewItem) => (
+                    <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                      <Typography.Paragraph style={{ marginBottom: 0 }} ellipsis={{ rows: 3, expandable: true }}>
+                        {record.review_comment || "-"}
+                      </Typography.Paragraph>
+                      <Button
+                        type="link"
+                        size="small"
+                        style={{ paddingInline: 0, alignSelf: "flex-start" }}
+                        disabled={record.review_status !== "submitted"}
+                        onClick={() => {
+                          if (!reviewDrawerTask) return;
+                          void openReviewDetail(reviewDrawerTask, record);
+                        }}
+                      >
+                        查看详情
+                      </Button>
+                    </Space>
+                  ),
+                },
               ]}
             />
           </Space>
         ) : null}
       </Drawer>
+      <AdminProjectTaskReviewDetailDrawer
+        open={reviewDetailOpen}
+        loading={reviewDetailLoading}
+        detail={reviewDetail}
+        projectName={project?.name}
+        onClose={() => {
+          setReviewDetailOpen(false);
+          setReviewDetail(null);
+        }}
+      />
     </Space>
   );
 }

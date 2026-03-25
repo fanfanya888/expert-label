@@ -25,10 +25,6 @@ const SystemInfoPage = lazyNamedPage(() => import("./pages/SystemInfoPage"), "Sy
 
 const AccountsPage = lazyNamedPage(() => import("./pages/admin/AccountsPage"), "AccountsPage");
 const ProjectTasksPage = lazyNamedPage(() => import("./pages/admin/ProjectTasksPage"), "ProjectTasksPage");
-const SingleTurnSearchCaseResultsPage = lazyNamedPage(
-  () => import("./pages/admin/SingleTurnSearchCaseResultsPage"),
-  "SingleTurnSearchCaseResultsPage",
-);
 
 const ModelResponseReviewPage = lazyNamedPage(
   () => import("./pages/user/ModelResponseReviewPage"),
@@ -78,7 +74,6 @@ export default function App() {
               <Route path="dashboard" element={<DashboardPage />} />
               <Route path="projects" element={<ProjectsPage />} />
               <Route path="projects/:projectId/tasks" element={<ProjectTasksPage />} />
-              <Route path="projects/:projectId/search-case-results" element={<SingleTurnSearchCaseResultsPage />} />
               <Route path="accounts" element={<AccountsPage />} />
               <Route path="system" element={<SystemInfoPage />} />
             </Route>

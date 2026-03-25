@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -101,6 +102,144 @@ def _build_review_read(db: Session, review) -> ProjectTaskReviewRead:
             reviewer_username=reviewer_username,
         )
     )
+
+
+def _parse_submission_time(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+
+    normalized = value.strip()
+    if not normalized:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _resolve_review_submission(
+    db: Session,
+    *,
+    project,
+    task,
+    review,
+) -> dict[str, Any] | None:
+    plugin = get_plugin_registry().get(project.plugin_code or "")
+    if plugin is None or not hasattr(plugin, "list_project_task_submissions"):
+        return None
+
+    submission_plugin = cast(Any, plugin)
+    submissions = submission_plugin.list_project_task_submissions(
+        db,
+        project_id=project.id,
+        task_id=task.external_task_id,
+        limit=100,
+    )
+    if not isinstance(submissions, list) or not submissions:
+        return None
+
+    reference_time = review.claimed_at or review.submitted_at or review.created_at
+    if reference_time.tzinfo is None:
+        reference_time = reference_time.replace(tzinfo=timezone.utc)
+
+    def submission_sort_key(item: Any) -> tuple[float, int]:
+        payload = item if isinstance(item, dict) else {}
+        submitted_at = _parse_submission_time(payload.get("submitted_at"))
+        submission_id_raw = payload.get("submission_id")
+        submission_id = (
+            int(submission_id_raw)
+            if isinstance(submission_id_raw, int | str) and str(submission_id_raw).isdigit()
+            else 0
+        )
+        return submitted_at.timestamp() if submitted_at is not None else float("-inf"), submission_id
+
+    ordered_submissions = sorted(submissions, key=submission_sort_key, reverse=True)
+    matched_submission = next(
+        (
+            item
+            for item in ordered_submissions
+            if isinstance(item, dict)
+            if (
+                (submitted_at := _parse_submission_time(item.get("submitted_at")))
+                is not None
+                and submitted_at <= reference_time
+            )
+        ),
+        None,
+    )
+    selected_submission = matched_submission or ordered_submissions[0]
+
+    if hasattr(submission_plugin, "get_admin_submission_detail"):
+        submission_id_raw = selected_submission.get("submission_id")
+        if isinstance(submission_id_raw, int | str) and str(submission_id_raw).isdigit():
+            detail = submission_plugin.get_admin_submission_detail(
+                db,
+                project.id,
+                int(submission_id_raw),
+            )
+            if isinstance(detail, dict):
+                return detail
+
+    return selected_submission if isinstance(selected_submission, dict) else None
+
+
+def _build_review_task_detail(
+    db: Session,
+    *,
+    project,
+    task,
+    review,
+) -> dict[str, Any]:
+    review_stats = get_project_task_review_stats_map(db, [task.id]).get(task.id, {})
+    task_payload = _build_task_read(db, task, review_stats=review_stats)
+
+    review_rows = list_task_reviews(db, task.id)
+    username_map = get_usernames_map(
+        db,
+        [item.reviewer_id for item in review_rows if item.reviewer_id is not None],
+    )
+    review_history = [
+        ProjectTaskReviewRead.model_validate(
+            build_project_task_review_payload(
+                item,
+                reviewer_username=(
+                    username_map.get(item.reviewer_id)
+                    if item.reviewer_id is not None
+                    else None
+                ),
+            )
+        )
+        for item in review_rows
+    ]
+
+    review_payload = ProjectTaskReviewRead.model_validate(
+        build_project_task_review_payload(
+            review,
+            reviewer_username=(
+                username_map.get(review.reviewer_id)
+                if review.reviewer_id is not None
+                else None
+            ),
+        )
+    )
+
+    return {
+        "review": review_payload.model_dump(mode="json"),
+        "task": task_payload.model_dump(mode="json"),
+        "submission": _resolve_review_submission(
+            db,
+            project=project,
+            task=task,
+            review=review,
+        ),
+        "review_history": [item.model_dump(mode="json") for item in review_history],
+    }
 
 
 @router.get("")
@@ -312,4 +451,29 @@ def list_admin_project_task_reviews(
         )
         for item in items
     ]
+    return build_response(data=serialize_schema(data))
+
+
+@router.get("/{task_id}/reviews/{review_id}")
+def get_admin_project_task_review_detail(
+    project_id: int,
+    task_id: int,
+    review_id: int,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    project = _get_project_or_404(db, project_id)
+    task = get_project_task_by_id(db, project_id, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task is not found")
+
+    review = next((item for item in list_task_reviews(db, task.id) if item.id == review_id), None)
+    if review is None:
+        raise HTTPException(status_code=404, detail="review is not found")
+
+    data = _build_review_task_detail(
+        db,
+        project=project,
+        task=task,
+        review=review,
+    )
     return build_response(data=serialize_schema(data))

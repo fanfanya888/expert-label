@@ -151,6 +151,7 @@
   - 后端会为缺省 `task_name` 自动补默认值 `搜索模板`，`external_task_id` 继续自动生成
   - 模板列表已改成紧凑表格，发布时间并入概览列，默认桌面宽度下不再依赖横向滚动
   - 模板列表里的操作按钮已稍微放大，保留紧凑排版但降低“小按钮”观感
+  - 任务管理页已去掉 `查看提交结果` 入口，管理端不再保留这套独立提交结果页
 - `model_response_review` 的任务管理已与模板管理页对齐：
   - 列表改成前端顺序 `ID`，删除后新增会补回当前可见序号，不跟后端 `external_task_id` 绑定
   - 列表改成紧凑表格，只保留 `ID / Prompt / 流转信息 / 操作`
@@ -160,6 +161,10 @@
   - 用户提交后自动进入 `review_pending`
   - 管理员只在 `review_submitted` 之后决定是否追加下一轮质检或直接通过
 - 管理端任务列表里已去掉 `查看试标`。
+- 管理端 `查看质检` 抽屉里的每轮记录现在已支持 `查看详情`：
+  - 只读展示该轮质检结论、整体说明和模块批注
+  - 会按该轮质检的 `claimed_at / submitted_at` 时间向前匹配最近一次标注提交快照，回看历史质检页
+  - 当前覆盖 `model_response_review` 和 `single_turn_search_case`
 
 ### 前端性能
 
@@ -187,6 +192,10 @@
   - `backend/app/core/task_workflow.py`
   - `backend/app/crud/project_tasks.py`
   - `backend/app/crud/project_task_reviews.py`
+- 管理端任务 / 质检历史详情：
+  - `backend/app/api/routes/admin_project_tasks.py`
+  - `frontend/src/pages/admin/ProjectTasksPage.tsx`
+  - `frontend/src/pages/admin/AdminProjectTaskReviewDetailDrawer.tsx`
 - 用户端大厅 / 质检队列 / 提交记录接口：
   - `backend/app/api/routes/me_projects.py`
 - 插件提交流：
@@ -206,6 +215,8 @@
 
 - 前端构建通过：
   - `cd frontend && npm run build`
+- 后端目标文件语法通过：
+  - `python -m py_compile backend/app/api/routes/admin_project_tasks.py`
 - 当前前端构建已不再出现 `chunk > 500 kB` 警告。
 
 ## 当前边界
@@ -213,11 +224,11 @@
 - 继续保持最小可运行，不做通用任务引擎。
 - 仍是单账号单有效会话。
 - “放弃任务回池”当前只支持未再次提交前的进行中标注题目。
-- 管理端已经能看质检轮次和整体说明，但还没有专门收结构化批注的查看/复用界面。
+- 管理端已经能看质检轮次、整体说明、结构化批注和 V1 历史质检详情，但 `review -> submission` 仍是按时间推断，不是显式审计绑定。
 
 ## 后续可继续做
 
-- 管理端补结构化批注查看与使用。
+- 把管理端历史质检详情从 V1 时间推断升级成显式 `review/submission` 绑定。
 - 做长时间未提交任务的超时回收。
 - 补管理端任务筛选和批量操作。
 

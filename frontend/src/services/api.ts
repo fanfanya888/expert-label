@@ -208,6 +208,10 @@ export async function fetchAdminProjectTaskReviews(projectId: number, taskId: nu
   return ensureArray<ProjectTaskReviewItem>(data);
 }
 
+export async function fetchAdminProjectTaskReviewDetail(projectId: number, taskId: number, reviewId: number) {
+  return request<ProjectTaskReviewTaskDetail>(`/api/admin/projects/${projectId}/tasks/${taskId}/reviews/${reviewId}`);
+}
+
 export function publishAdminProjectTask(projectId: number, taskId: number) {
   return request<AdminProjectTaskItem>(`/api/admin/projects/${projectId}/tasks/${taskId}/publish`, {
     method: "PATCH",
@@ -460,18 +464,6 @@ export function submitSingleTurnSearchCaseSubmission(
     method: "POST",
     body: JSON.stringify(payload),
   });
-}
-
-export async function fetchAdminSingleTurnSearchCaseRecords(projectId: number, taskId?: string | null) {
-  const query = taskId ? `?task_id=${encodeURIComponent(taskId)}` : "";
-  const data = await request<unknown>(`/api/plugins/single_turn_search_case/admin/projects/${projectId}/records${query}`);
-  return ensureArray<SingleTurnSearchCaseSubmissionSummary>(data);
-}
-
-export function fetchAdminSingleTurnSearchCaseRecordDetail(projectId: number, submissionId: number) {
-  return request<SingleTurnSearchCaseSubmissionDetail>(
-    `/api/plugins/single_turn_search_case/admin/projects/${projectId}/records/${submissionId}`,
-  );
 }
 
 export function fetchAdminUsers() {
