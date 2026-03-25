@@ -60,7 +60,7 @@ class SingleTurnSearchCaseProjectStats(BaseModel):
 class SingleTurnSearchCaseTaskPayload(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
-    task_name: str = Field(min_length=1, max_length=100)
+    task_name: str = Field(default="搜索模板", min_length=1, max_length=100)
     task_description: str | None = None
     instruction_text: str | None = None
     require_model_screenshot: bool = True

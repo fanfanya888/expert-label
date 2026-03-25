@@ -6,14 +6,14 @@ import { useNavigate } from "react-router-dom";
 import { fetchAdminProjects, publishAdminProject, unpublishAdminProject } from "../services/api";
 import type { ProjectItem } from "../types/api";
 
-function getPublishStatusText(status: string): string {
+function getPublishMeta(status: string) {
   if (status === "published") {
-    return "已发布";
+    return { color: "green", label: "已发布" };
   }
   if (status === "offline") {
-    return "已下线";
+    return { color: "default", label: "已下线" };
   }
-  return status;
+  return { color: "default", label: status };
 }
 
 export function ProjectsPage() {
@@ -64,12 +64,13 @@ export function ProjectsPage() {
   };
 
   return (
-    <Space direction="vertical" size={20} style={{ width: "100%" }}>
+    <Space direction="vertical" size={20} style={{ width: "100%" }} className="projects-page">
       {loadError ? <Alert type="warning" showIcon message="获取项目列表失败" description={loadError} /> : null}
 
       <Card
         title="项目列表"
-        className="panel-card"
+        className="panel-card projects-page__panel"
+        bodyStyle={{ padding: 12 }}
         extra={
           <Button icon={<ReloadOutlined />} onClick={() => void loadProjects()} loading={loading}>
             刷新
@@ -80,49 +81,62 @@ export function ProjectsPage() {
           rowKey="id"
           dataSource={Array.isArray(items) ? items : []}
           loading={loading}
+          className="admin-projects-table"
+          size="middle"
           pagination={false}
+          scroll={{ x: 1040 }}
           locale={{ emptyText: <Empty description="暂无项目" /> }}
           columns={[
             {
               title: "项目",
+              width: 300,
               render: (_, record) => (
-                <Space direction="vertical" size={4}>
+                <Space direction="vertical" size={2} style={{ display: "flex" }}>
                   <Typography.Text strong>{record.name}</Typography.Text>
-                  <Typography.Text type="secondary">{record.description || "暂无项目说明"}</Typography.Text>
+                  <Typography.Paragraph
+                    type="secondary"
+                    ellipsis={{ rows: 2, tooltip: record.description || "暂无项目说明" }}
+                    style={{ marginBottom: 0 }}
+                  >
+                    {record.description || "暂无项目说明"}
+                  </Typography.Paragraph>
                 </Space>
               ),
             },
             {
               title: "发布状态",
-              render: (_, record) => (
-                <Space direction="vertical" size={6}>
-                  <Tag color={record.is_published ? "green" : "default"}>
-                    {record.is_published ? "已发布" : "未发布"}
-                  </Tag>
-                  <Typography.Text type="secondary">{getPublishStatusText(record.publish_status)}</Typography.Text>
-                  <Typography.Text type="secondary">用户可见：{record.is_visible ? "是" : "否"}</Typography.Text>
-                </Space>
-              ),
+              width: 188,
+              render: (_, record) => {
+                const publishMeta = getPublishMeta(record.publish_status);
+                return (
+                  <Space direction="vertical" size={4} style={{ display: "flex" }}>
+                    <Tag color={publishMeta.color}>{publishMeta.label}</Tag>
+                    <Typography.Text type="secondary">{record.is_visible ? "用户可见" : "用户隐藏"}</Typography.Text>
+                  </Space>
+                );
+              },
             },
             {
               title: "任务统计",
+              width: 212,
               render: (_, record) => (
-                <Space direction="vertical" size={4}>
-                  <Typography.Text>总任务：{record.task_total}</Typography.Text>
-                  <Typography.Text type="secondary">已完成：{record.task_completed}</Typography.Text>
-                  <Typography.Text type="secondary">待完成：{record.task_pending}</Typography.Text>
+                <Space direction="vertical" size={3} style={{ display: "flex" }}>
+                  <Typography.Text>总任务 {record.task_total}</Typography.Text>
+                  <Typography.Text type="secondary">已完成 {record.task_completed}</Typography.Text>
+                  <Typography.Text type="secondary">待完成 {record.task_pending}</Typography.Text>
                 </Space>
               ),
             },
             {
               title: "发布时间",
+              width: 176,
               render: (_, record) => (record.published_at ? new Date(record.published_at).toLocaleString() : "-"),
             },
             {
               title: "操作",
-              width: 220,
+              width: 210,
               render: (_, record) => (
-                <Space>
+                <Space wrap>
                   <Button icon={<ProfileOutlined />} onClick={() => navigate(`/admin/projects/${record.id}/tasks`)}>
                     任务管理
                   </Button>

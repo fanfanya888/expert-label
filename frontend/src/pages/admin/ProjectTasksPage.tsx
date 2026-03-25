@@ -55,7 +55,6 @@ import type {
 } from "../../types/api";
 
 interface ModelResponseReviewTaskFormValues {
-  external_task_id?: string;
   task_category?: string;
   prompt: string;
   model_reply?: string;
@@ -64,9 +63,6 @@ interface ModelResponseReviewTaskFormValues {
 }
 
 interface SearchCaseTaskFormValues {
-  external_task_id?: string;
-  task_name: string;
-  task_description?: string;
   instruction_text?: string;
   require_model_screenshot: boolean;
   require_share_link: boolean;
@@ -166,7 +162,7 @@ function getModelResponsePayload(payload: Record<string, unknown>): ModelRespons
 
 function getSearchCasePayload(payload: Record<string, unknown>): SingleTurnSearchCaseTaskTemplatePayload {
   return {
-    task_name: String(payload.task_name || ""),
+    task_name: String(payload.task_name || "搜索模板"),
     task_description: payload.task_description ? String(payload.task_description) : null,
     instruction_text: payload.instruction_text ? String(payload.instruction_text) : null,
     require_model_screenshot: Boolean(payload.require_model_screenshot ?? true),
@@ -206,6 +202,25 @@ export function ProjectTasksPage() {
   const isModelResponseReview = project?.plugin_code === "model_response_review";
   const isSearchCase = project?.plugin_code === "single_turn_search_case";
   const isSupportedProject = isModelResponseReview || isSearchCase;
+  const isCompactTaskTable = isModelResponseReview || isSearchCase;
+  const tableItems = useMemo(
+    () => (isCompactTaskTable ? [...items].sort((left, right) => left.id - right.id) : items),
+    [isCompactTaskTable, items],
+  );
+  const displayIdMap = useMemo(() => {
+    const map = new Map<number, number>();
+    tableItems.forEach((item, index) => {
+      map.set(item.id, index + 1);
+    });
+    return map;
+  }, [tableItems]);
+
+  const getDisplayId = (taskId: number) => displayIdMap.get(taskId) ?? 0;
+  const getTaskLabel = (task: AdminProjectTaskItem) => {
+    if (isSearchCase) return `模板 ${getDisplayId(task.id)}`;
+    if (isModelResponseReview) return `任务 ${getDisplayId(task.id)}`;
+    return `任务 ${task.external_task_id}`;
+  };
 
   const resetPageState = () => {
     setProject(null);
@@ -295,7 +310,6 @@ export function ProjectTasksPage() {
       }
     }
     const payload: AdminProjectTaskCreatePayload = {
-      external_task_id: values.external_task_id?.trim() || null,
       task_payload: {
         prompt: values.prompt.trim(),
         model_reply: values.model_reply?.trim() || null,
@@ -319,10 +333,7 @@ export function ProjectTasksPage() {
 
   const handleCreateSearchCaseTask = async (values: SearchCaseTaskFormValues) => {
     const payload: AdminProjectTaskCreatePayload = {
-      external_task_id: values.external_task_id?.trim() || null,
       task_payload: {
-        task_name: values.task_name.trim(),
-        task_description: values.task_description?.trim() || null,
         instruction_text: values.instruction_text?.trim() || null,
         require_model_screenshot: values.require_model_screenshot,
         require_share_link: values.require_share_link,
@@ -398,8 +409,8 @@ export function ProjectTasksPage() {
 
   const handleDeleteTask = (task: AdminProjectTaskItem) => {
     Modal.confirm({
-      title: "删除任务",
-      content: `确认删除任务 ${task.external_task_id} 吗？已提交的试标和质检记录也会一起删除。`,
+      title: isSearchCase ? "删除模板" : "删除任务",
+      content: `确认删除${getTaskLabel(task)}吗？已提交的试标和质检记录也会一起删除。`,
       okText: "删除",
       okButtonProps: { danger: true },
       cancelText: "取消",
@@ -433,7 +444,7 @@ export function ProjectTasksPage() {
     }
   };
 
-  const renderWorkflow = (record: AdminProjectTaskItem) => {
+  const renderWorkflow = (record: AdminProjectTaskItem, compact = false) => {
     const publishMeta = getPublishMeta(record.publish_status);
     const taskMeta = getTaskMeta(record.task_status);
     const latestReviewMeta = getReviewMeta(record.latest_review_status);
@@ -444,19 +455,24 @@ export function ProjectTasksPage() {
           <Tag color={taskMeta.color}>{taskMeta.label}</Tag>
           {latestReviewMeta ? <Tag color={latestReviewMeta.color}>{`最新质检：${latestReviewMeta.label}`}</Tag> : null}
         </Space>
-        <Typography.Text type="secondary">{`试标人：${formatUserText(record.annotation_assignee_username, record.annotation_assignee_id)}`}</Typography.Text>
+        <Typography.Paragraph style={{ marginBottom: 0 }} type="secondary" ellipsis={compact ? { rows: 1, tooltip: `试标人：${formatUserText(record.annotation_assignee_username, record.annotation_assignee_id)}` } : false}>
+          {`试标人：${formatUserText(record.annotation_assignee_username, record.annotation_assignee_id)}`}
+        </Typography.Paragraph>
         <Typography.Text type="secondary">{`试标提交：${formatDateTime(record.annotation_submitted_at)}`}</Typography.Text>
         <Typography.Text type="secondary">{`质检轮次：${record.review_round_count}`}</Typography.Text>
         {(record.latest_reviewer_id || record.latest_reviewer_username) ? (
-          <Typography.Text type="secondary">{`最新质检人：${formatUserText(record.latest_reviewer_username, record.latest_reviewer_id)}`}</Typography.Text>
+          <Typography.Paragraph style={{ marginBottom: 0 }} type="secondary" ellipsis={compact ? { rows: 1, tooltip: `最新质检人：${formatUserText(record.latest_reviewer_username, record.latest_reviewer_id)}` } : false}>
+            {`最新质检人：${formatUserText(record.latest_reviewer_username, record.latest_reviewer_id)}`}
+          </Typography.Paragraph>
         ) : null}
       </Space>
     );
   };
 
-  const renderActions = (record: AdminProjectTaskItem) => (
-    <Space wrap>
+  const renderActions = (record: AdminProjectTaskItem, compact = false) => (
+    <Space wrap size={compact ? [8, 8] : [8, 8]}>
       <Button
+        size={compact ? "small" : "middle"}
         type={record.publish_status === "published" ? "default" : "primary"}
         icon={record.publish_status === "published" ? <StopOutlined /> : <CheckCircleOutlined />}
         loading={actionKey === `publish-${record.id}`}
@@ -464,50 +480,70 @@ export function ProjectTasksPage() {
       >
         {record.publish_status === "published" ? "下线" : "发布"}
       </Button>
-      <Button disabled={!canDispatchReview(record)} loading={actionKey === `dispatch-${record.id}`} onClick={() => void handleDispatchReview(record)}>
+      <Button size={compact ? "small" : "middle"} disabled={!canDispatchReview(record)} loading={actionKey === `dispatch-${record.id}`} onClick={() => void handleDispatchReview(record)}>
         追加质检
       </Button>
-      <Button disabled={!canApproveTask(record)} loading={actionKey === `approve-${record.id}`} onClick={() => void handleApproveTask(record)}>
+      <Button size={compact ? "small" : "middle"} disabled={!canApproveTask(record)} loading={actionKey === `approve-${record.id}`} onClick={() => void handleApproveTask(record)}>
         质检通过
       </Button>
-      <Button disabled={record.review_round_count === 0} onClick={() => void openReviewDrawer(record)}>
+      <Button size={compact ? "small" : "middle"} disabled={record.review_round_count === 0} onClick={() => void openReviewDrawer(record)}>
         查看质检
       </Button>
-      <Button danger loading={actionKey === `delete-${record.id}`} onClick={() => handleDeleteTask(record)}>
+      <Button size={compact ? "small" : "middle"} danger loading={actionKey === `delete-${record.id}`} onClick={() => handleDeleteTask(record)}>
         删除
       </Button>
     </Space>
   );
 
+  const renderModelResponseOverview = (record: AdminProjectTaskItem) => {
+    const payload = getModelResponsePayload(record.task_payload);
+    return (
+      <Typography.Paragraph style={{ marginBottom: 0 }} ellipsis={{ rows: 3, tooltip: payload.prompt }}>
+        {payload.prompt}
+      </Typography.Paragraph>
+    );
+  };
+
   const columns = isSearchCase
     ? [
-        { title: "模板名称", render: (_: unknown, record: AdminProjectTaskItem) => getSearchCasePayload(record.task_payload).task_name },
         {
-          title: "模板说明",
-          render: (_: unknown, record: AdminProjectTaskItem) => (
-            <Typography.Paragraph ellipsis={{ rows: 2, expandable: true }} style={{ marginBottom: 0 }}>
-              {getSearchCasePayload(record.task_payload).task_description || "暂无说明"}
-            </Typography.Paragraph>
-          ),
+          title: "ID",
+          width: 72,
+          render: (_: unknown, record: AdminProjectTaskItem) => <Typography.Text strong>{getDisplayId(record.id)}</Typography.Text>,
         },
         {
-          title: "模板配置",
-          width: 220,
+          title: "模板概览",
+          width: 280,
           render: (_: unknown, record: AdminProjectTaskItem) => {
             const payload = getSearchCasePayload(record.task_payload);
             return (
               <Space direction="vertical" size={4}>
-                <Typography.Text>{`规则 ${payload.scoring_rules_min}-${payload.scoring_rules_max}`}</Typography.Text>
-                <Typography.Text type="secondary">{`至少扣分项 ${payload.min_penalty_rules}`}</Typography.Text>
+                <Typography.Text>{`规则 ${payload.scoring_rules_min}-${payload.scoring_rules_max} / 扣分项 ${payload.min_penalty_rules}+`}</Typography.Text>
+                <Typography.Text type="secondary">{payload.instruction_text ? "已配置作业指引" : "使用默认作业指引"}</Typography.Text>
                 <Typography.Text type="secondary">{`领域 ${payload.domain_options.length} / 时效 ${payload.timeliness_options.length}`}</Typography.Text>
+                <Typography.Text type="secondary">{`发布时间 ${formatDateTime(record.published_at)}`}</Typography.Text>
               </Space>
             );
           },
         },
-        { title: "流转信息", width: 260, render: (_: unknown, record: AdminProjectTaskItem) => renderWorkflow(record) },
-        { title: "发布时间", width: 180, render: (_: unknown, record: AdminProjectTaskItem) => formatDateTime(record.published_at) },
-        { title: "操作", width: 260, render: (_: unknown, record: AdminProjectTaskItem) => renderActions(record) },
+        { title: "流转信息", width: 250, render: (_: unknown, record: AdminProjectTaskItem) => renderWorkflow(record, true) },
+        { title: "操作", width: 240, render: (_: unknown, record: AdminProjectTaskItem) => renderActions(record, true) },
       ]
+    : isModelResponseReview
+      ? [
+          {
+            title: "ID",
+            width: 72,
+            render: (_: unknown, record: AdminProjectTaskItem) => <Typography.Text strong>{getDisplayId(record.id)}</Typography.Text>,
+          },
+          {
+            title: "Prompt",
+            width: 300,
+            render: (_: unknown, record: AdminProjectTaskItem) => renderModelResponseOverview(record),
+          },
+          { title: "流转信息", width: 250, render: (_: unknown, record: AdminProjectTaskItem) => renderWorkflow(record, true) },
+          { title: "操作", width: 240, render: (_: unknown, record: AdminProjectTaskItem) => renderActions(record, true) },
+        ]
     : [
         { title: "任务标识", dataIndex: "external_task_id", width: 180 },
         {
@@ -549,10 +585,13 @@ export function ProjectTasksPage() {
       <Card title={isSearchCase ? "模板列表" : "任务列表"} className="panel-card">
         <Table<AdminProjectTaskItem>
           rowKey="id"
-          dataSource={Array.isArray(items) ? items : []}
+          dataSource={tableItems}
           loading={loading}
+          className={isCompactTaskTable ? "admin-task-table admin-task-table--compact" : "admin-task-table"}
+          size={isCompactTaskTable ? "small" : "middle"}
           pagination={false}
-          scroll={{ x: 1200 }}
+          scroll={isCompactTaskTable ? undefined : { x: 1200 }}
+          tableLayout={isCompactTaskTable ? "fixed" : undefined}
           locale={{ emptyText: isSearchCase ? "暂无模板，可继续新建模板" : "暂无任务，可继续新建任务" }}
           columns={columns}
         />
@@ -569,11 +608,6 @@ export function ProjectTasksPage() {
       >
         {isSearchCase ? (
           <Form form={searchCaseForm} layout="vertical" onFinish={handleCreateSearchCaseTask}>
-            <Row gutter={16}>
-              <Col xs={24} md={12}><Form.Item label="模板标识" name="external_task_id"><Input placeholder="可选，留空则自动生成" /></Form.Item></Col>
-              <Col xs={24} md={12}><Form.Item label="模板名称" name="task_name" rules={[{ required: true, message: "请输入模板名称" }]}><Input /></Form.Item></Col>
-            </Row>
-            <Form.Item label="模板说明" name="task_description"><Input.TextArea rows={3} /></Form.Item>
             <Form.Item label="作业指引文案" name="instruction_text"><Input.TextArea rows={4} /></Form.Item>
             <Row gutter={16}>
               <Col xs={24} md={8}><Form.Item label="规则最少条数" name="scoring_rules_min" rules={[{ required: true, message: "请输入规则最少条数" }]}><InputNumber min={5} max={20} style={{ width: "100%" }} /></Form.Item></Col>
@@ -596,7 +630,6 @@ export function ProjectTasksPage() {
           </Form>
         ) : (
           <Form form={modelResponseForm} layout="vertical" onFinish={handleCreateModelResponseTask}>
-            <Form.Item label="任务标识" name="external_task_id"><Input placeholder="可选，留空则自动生成" /></Form.Item>
             <Form.Item label="任务类型" name="task_category">
               <Select allowClear options={(mrrSchema?.task_category_options ?? []).map((item) => ({ label: item, value: item }))} placeholder="可选，不填时默认为 Other" />
             </Form.Item>
@@ -608,11 +641,13 @@ export function ProjectTasksPage() {
         )}
       </Modal>
 
-      <Drawer title={reviewDrawerTask ? `质检记录 / ${reviewDrawerTask.external_task_id}` : "质检记录"} width={860} open={reviewDrawerOpen} onClose={() => { setReviewDrawerOpen(false); setReviewDrawerTask(null); setReviewItems([]); }}>
+      <Drawer title={reviewDrawerTask ? `质检记录 / ${getTaskLabel(reviewDrawerTask)}` : "质检记录"} width={860} open={reviewDrawerOpen} onClose={() => { setReviewDrawerOpen(false); setReviewDrawerTask(null); setReviewItems([]); }}>
         {reviewDrawerTask ? (
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
             <Descriptions column={1} bordered size="small">
-              <Descriptions.Item label="任务标识">{reviewDrawerTask.external_task_id}</Descriptions.Item>
+              <Descriptions.Item label={isSearchCase ? "模板 ID" : isModelResponseReview ? "任务 ID" : "任务标识"}>
+                {isCompactTaskTable ? getDisplayId(reviewDrawerTask.id) : reviewDrawerTask.external_task_id}
+              </Descriptions.Item>
               <Descriptions.Item label="当前阶段"><Tag color={getTaskMeta(reviewDrawerTask.task_status).color}>{getTaskMeta(reviewDrawerTask.task_status).label}</Tag></Descriptions.Item>
               <Descriptions.Item label="试标人">{formatUserText(reviewDrawerTask.annotation_assignee_username, reviewDrawerTask.annotation_assignee_id)}</Descriptions.Item>
               <Descriptions.Item label="试标提交时间">{formatDateTime(reviewDrawerTask.annotation_submitted_at)}</Descriptions.Item>
