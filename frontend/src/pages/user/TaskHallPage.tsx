@@ -55,7 +55,7 @@ export function TaskHallPage() {
         message.warning("当前没有可领取的标注任务");
         return;
       }
-      message.success("已领取标注任务，请前往标注任务页开始试标");
+      message.success("已领取标注任务，请前往标注任务页开始处理");
       navigate("/user/annotation-tasks");
     } catch (error) {
       message.error(error instanceof Error ? error.message : "领取标注任务失败");
@@ -69,6 +69,13 @@ export function TaskHallPage() {
     if (!session?.user.can_review) {
       return;
     }
+    if (project.current_user_review_owned_count > 0) {
+      navigate("/user/review-tasks");
+      return;
+    }
+    if (!project.can_claim_review) {
+      return;
+    }
 
     const key = `review-${project.id}`;
     setActionKey(key);
@@ -78,7 +85,8 @@ export function TaskHallPage() {
         message.warning("当前没有可领取的质检任务");
         return;
       }
-      navigate(`/user/projects/${project.id}/review`);
+      message.success("已领取质检任务，请前往质检任务页开始处理");
+      navigate("/user/review-tasks");
     } catch (error) {
       message.error(error instanceof Error ? error.message : "领取质检任务失败");
     } finally {
@@ -101,7 +109,7 @@ export function TaskHallPage() {
           任务大厅
         </Typography.Title>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          这里展示当前还能领取的标注任务和质检任务。试标未通过前每个项目只能持有 1 题，试标通过后每个项目最多可同时持有 2 题。
+          这里展示当前还能领取的标注任务和质检任务。试标未通过前每个项目只能持有 1 题，试标通过后每个项目最多可同时持有 2 题；质检任务最多可同时领取 3 个。
         </Typography.Paragraph>
       </Card>
 
@@ -141,6 +149,9 @@ export function TaskHallPage() {
                     <Typography.Text type="secondary" style={{ display: "block", marginTop: 8 }}>
                       {`我的标注持有量 ${project.current_user_annotation_owned_count}/${project.current_user_annotation_limit}`}
                     </Typography.Text>
+                    <Typography.Text type="secondary" style={{ display: "block", marginTop: 4 }}>
+                      {`我的质检持有量 ${project.current_user_total_review_owned_count}/${project.current_user_review_limit}`}
+                    </Typography.Text>
                   </div>
 
                   <Space wrap>
@@ -153,7 +164,9 @@ export function TaskHallPage() {
                         onClick={() => void handleClaimAnnotation(project)}
                       >
                         {project.can_claim_annotation
-                          ? "申请领取标注"
+                          ? project.trial_passed
+                            ? "领取标注"
+                            : "申请领取标注"
                           : project.current_user_annotation_owned_count > 0
                             ? "去标注任务"
                             : "暂无可领标注"}
@@ -163,10 +176,14 @@ export function TaskHallPage() {
                       <Button
                         icon={<SafetyCertificateOutlined />}
                         loading={actionKey === `review-${project.id}`}
-                        disabled={project.review_available_count <= 0}
+                        disabled={!project.can_claim_review && project.current_user_review_owned_count === 0}
                         onClick={() => void handleClaimReview(project)}
                       >
-                        {project.review_available_count > 0 ? "申请领取质检" : "暂无可领质检"}
+                        {project.current_user_review_owned_count > 0
+                          ? "去质检任务"
+                          : project.can_claim_review
+                            ? "领取质检"
+                            : "暂无可领质检"}
                       </Button>
                     ) : null}
                   </Space>

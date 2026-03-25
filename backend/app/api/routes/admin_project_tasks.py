@@ -261,7 +261,7 @@ def dispatch_admin_project_task_review(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     data = _build_review_read(db, review)
-    return build_response(message="质检任务已发出", data=serialize_schema(data))
+    return build_response(message="质检轮次已追加", data=serialize_schema(data))
 
 
 @router.post("/{task_id}/approve")

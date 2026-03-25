@@ -40,6 +40,12 @@ class ProjectHallRead(ProjectRead):
     current_user_annotation_owned_count: int = 0
     current_user_task_id: str | None = None
     current_user_task_status: str | None = None
+    current_user_review_limit: int = 3
+    current_user_total_review_owned_count: int = 0
+    current_user_review_owned_count: int = 0
+    current_user_review_id: int | None = None
+    current_user_review_task_id: str | None = None
+    current_user_review_task_status: str | None = None
     trial_passed: bool = False
     can_claim_annotation: bool = False
     can_claim_review: bool = False

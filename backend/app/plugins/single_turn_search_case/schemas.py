@@ -419,6 +419,15 @@ class SingleTurnSearchCaseSavedSubmission(BaseModel):
     submitted_at: datetime
 
 
+class SingleTurnSearchCaseLatestReview(BaseModel):
+    review_id: int
+    review_round: int
+    review_result: str | None = None
+    review_comment: str | None = None
+    review_annotations: list[dict[str, str]] = Field(default_factory=list)
+    submitted_at: datetime | None = None
+
+
 class SingleTurnSearchCaseSubmissionSummary(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
@@ -453,3 +462,4 @@ class SingleTurnSearchCaseSubmissionDetail(SingleTurnSearchCaseSubmissionSummary
     template_snapshot: dict[str, Any]
     plugin_code: str
     plugin_version: str
+    latest_review: SingleTurnSearchCaseLatestReview | None = None

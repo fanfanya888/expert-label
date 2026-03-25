@@ -43,10 +43,10 @@ function isAwaitingReview(project: TaskHallProjectItem): boolean {
 
 function getStatusText(project: TaskHallProjectItem): string {
   if (isAwaitingReview(project)) {
-    return "当前最新试标已提交，正在等待管理员审核。";
+    return "当前已有试标进入审核流程，可以查看详情了解最新状态。";
   }
   if (project.current_user_annotation_owned_count > 0) {
-    return "当前有可继续处理的试标题目。";
+    return project.trial_passed ? "当前有可继续处理的任务。" : "当前有可继续处理的试标题目。";
   }
   if (project.trial_passed) {
     return "试标已通过，可继续领取更多题目。";
@@ -119,7 +119,7 @@ export function MyProjectsPage() {
           标注任务
         </Typography.Title>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          这里只显示你已经领取的标注项目。领取新题请先到任务大厅，领取成功后再回到这里开始试标或查看审核状态。
+          这里只显示你已经领取的标注项目。领取新题请先到任务大厅，领取成功后再回到这里开始处理或查看审核状态。
         </Typography.Paragraph>
       </Card>
 
@@ -143,12 +143,12 @@ export function MyProjectsPage() {
         <Row gutter={[20, 20]}>
           {ownedItems.map((project) => {
             const waitingForReview = isAwaitingReview(project);
-            const detailPath = resolveReadonlyDetailRoute(project);
+            const detailPath = waitingForReview ? resolveReadonlyDetailRoute(project) : null;
 
             return (
               <Col xs={24} md={12} xl={8} key={project.id}>
-                <Card className="panel-card">
-                  <Space direction="vertical" size={14} style={{ width: "100%" }}>
+                <Card className="panel-card" style={{ height: "100%" }} bodyStyle={{ height: "100%" }}>
+                  <Space direction="vertical" size={14} style={{ width: "100%", height: "100%" }}>
                     <div>
                       <Typography.Title level={5} style={{ margin: 0 }}>
                         {project.name}
@@ -158,7 +158,7 @@ export function MyProjectsPage() {
                       </Typography.Paragraph>
                     </div>
 
-                    <div>
+                    <div style={{ minHeight: 64 }}>
                       <Typography.Text type="secondary" style={{ display: "block" }}>
                         {`已领取题数：${project.current_user_annotation_owned_count}/${project.current_user_annotation_limit}`}
                       </Typography.Text>
@@ -167,14 +167,14 @@ export function MyProjectsPage() {
                       </Typography.Text>
                     </div>
 
-                    <Space wrap>
+                    <Space wrap style={{ minHeight: 32, marginTop: "auto" }}>
                       {waitingForReview ? (
                         <Button icon={<ClockCircleOutlined />} disabled>
                           待审核
                         </Button>
                       ) : (
                         <Button type="primary" icon={<ArrowRightOutlined />} onClick={() => enterAnnotation(project)}>
-                          开始试标
+                          {project.trial_passed ? "开始任务" : "开始试标"}
                         </Button>
                       )}
                       {detailPath ? (

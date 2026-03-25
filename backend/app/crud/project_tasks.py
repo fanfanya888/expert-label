@@ -3,19 +3,24 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Select, case, func, select
+from sqlalchemy import Select, case, delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.task_workflow import (
     ANNOTATION_ACTIVE_STATUSES,
     ANNOTATION_OWNED_STATUSES,
+    REVIEW_OWNED_STATUSES,
+    REVIEW_STATUS_WAITING_RESUBMISSION,
     TASK_COMPLETED_STATUSES,
     TASK_STATUS_ANNOTATION_IN_PROGRESS,
     TASK_STATUS_ANNOTATION_PENDING,
+    TASK_STATUS_REVIEW_PENDING,
 )
 from app.models.project import Project
 from app.models.project_task import ProjectTask
 from app.models.project_task_review import ProjectTaskReview
+
+MAX_CONCURRENT_REVIEW_TASKS = 3
 
 
 def list_project_tasks(
@@ -163,6 +168,21 @@ def get_project_task_hall_stats_map(
     if not project_ids:
         return {}
 
+    current_user_total_review_owned_count = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ProjectTaskReview)
+            .join(ProjectTask, ProjectTask.id == ProjectTaskReview.project_task_id)
+            .where(
+                ProjectTaskReview.reviewer_id == user_id,
+                ProjectTaskReview.review_status.in_(REVIEW_OWNED_STATUSES),
+                ProjectTask.publish_status == "published",
+                ProjectTask.is_visible.is_(True),
+            )
+        )
+        or 0
+    )
+
     task_rows = db.execute(
         select(
             ProjectTask.project_id,
@@ -225,11 +245,18 @@ def get_project_task_hall_stats_map(
             "current_user_annotation_limit": current_user_annotation_limit,
             "current_user_task_id": None,
             "current_user_task_status": None,
+            "current_user_review_owned_count": 0,
+            "current_user_total_review_owned_count": current_user_total_review_owned_count,
+            "current_user_review_limit": MAX_CONCURRENT_REVIEW_TASKS,
+            "current_user_review_id": None,
+            "current_user_review_task_id": None,
+            "current_user_review_task_status": None,
             "trial_passed": trial_passed,
             "can_claim_annotation": (
                 annotation_available_count > 0
                 and current_user_annotation_owned_count < current_user_annotation_limit
             ),
+            "can_claim_review": False,
             "claim_progress_percent": min(max(claim_progress_percent, 0), 100),
         }
 
@@ -242,8 +269,15 @@ def get_project_task_hall_stats_map(
                 "current_user_annotation_limit": 1,
                 "current_user_task_id": None,
                 "current_user_task_status": None,
+                "current_user_review_owned_count": 0,
+                "current_user_total_review_owned_count": current_user_total_review_owned_count,
+                "current_user_review_limit": MAX_CONCURRENT_REVIEW_TASKS,
+                "current_user_review_id": None,
+                "current_user_review_task_id": None,
+                "current_user_review_task_status": None,
                 "trial_passed": False,
                 "can_claim_annotation": False,
+                "can_claim_review": False,
                 "claim_progress_percent": 0,
             },
         )
@@ -286,6 +320,7 @@ def get_project_task_hall_stats_map(
             ProjectTask.project_id.in_(project_ids),
             ProjectTask.publish_status == "published",
             ProjectTask.is_visible.is_(True),
+            ProjectTask.task_status == TASK_STATUS_REVIEW_PENDING,
             ProjectTaskReview.review_status == "pending",
         )
         .group_by(ProjectTask.project_id)
@@ -293,10 +328,72 @@ def get_project_task_hall_stats_map(
     for row in review_rows:
         stats_map.setdefault(int(row.project_id), {})
         stats_map[int(row.project_id)]["review_available_count"] = int(row.review_available_count or 0)
+        stats_map[int(row.project_id)]["can_claim_review"] = (
+            int(row.review_available_count or 0) > 0
+            and current_user_total_review_owned_count < MAX_CONCURRENT_REVIEW_TASKS
+        )
+
+    review_owned_rows = db.execute(
+        select(
+            ProjectTask.project_id,
+            func.count(ProjectTaskReview.id).label("current_user_review_owned_count"),
+        )
+        .join(ProjectTaskReview, ProjectTaskReview.project_task_id == ProjectTask.id)
+        .where(
+            ProjectTask.project_id.in_(project_ids),
+            ProjectTask.publish_status == "published",
+            ProjectTask.is_visible.is_(True),
+            ProjectTaskReview.reviewer_id == user_id,
+            ProjectTaskReview.review_status.in_(REVIEW_OWNED_STATUSES),
+        )
+        .group_by(ProjectTask.project_id)
+    )
+    for row in review_owned_rows:
+        stats_map.setdefault(int(row.project_id), {})
+        stats_map[int(row.project_id)]["current_user_review_owned_count"] = int(
+            row.current_user_review_owned_count or 0
+        )
+
+    current_review_rows = db.execute(
+        select(ProjectTaskReview, ProjectTask)
+        .join(ProjectTask, ProjectTask.id == ProjectTaskReview.project_task_id)
+        .where(
+            ProjectTask.project_id.in_(project_ids),
+            ProjectTask.publish_status == "published",
+            ProjectTask.is_visible.is_(True),
+            ProjectTaskReview.reviewer_id == user_id,
+            ProjectTaskReview.review_status.in_(REVIEW_OWNED_STATUSES),
+        )
+        .order_by(
+            ProjectTask.project_id.asc(),
+            case(
+                (ProjectTaskReview.review_status == "in_progress", 0),
+                else_=1,
+            ),
+            ProjectTaskReview.claimed_at.desc().nullslast(),
+            ProjectTaskReview.id.desc(),
+        )
+    ).all()
+    seen_review_projects: set[int] = set()
+    for review, task in current_review_rows:
+        if task.project_id in seen_review_projects:
+            continue
+        seen_review_projects.add(task.project_id)
+        stats_map.setdefault(task.project_id, {})
+        stats_map[task.project_id]["current_user_review_id"] = review.id
+        stats_map[task.project_id]["current_user_review_task_id"] = task.external_task_id
+        stats_map[task.project_id]["current_user_review_task_status"] = task.task_status
 
     for project_id in project_ids:
         stats_map.setdefault(project_id, {})
         stats_map[project_id].setdefault("review_available_count", 0)
+        stats_map[project_id].setdefault("current_user_review_owned_count", 0)
+        stats_map[project_id].setdefault("current_user_total_review_owned_count", current_user_total_review_owned_count)
+        stats_map[project_id].setdefault("current_user_review_limit", MAX_CONCURRENT_REVIEW_TASKS)
+        stats_map[project_id].setdefault("current_user_review_id", None)
+        stats_map[project_id].setdefault("current_user_review_task_id", None)
+        stats_map[project_id].setdefault("current_user_review_task_status", None)
+        stats_map[project_id].setdefault("can_claim_review", False)
 
     return stats_map
 
@@ -473,6 +570,12 @@ def release_annotation_task(
     task.annotation_claimed_at = None
     task.annotation_submitted_at = None
     task.task_status = TASK_STATUS_ANNOTATION_PENDING
+    db.execute(
+        delete(ProjectTaskReview).where(
+            ProjectTaskReview.project_task_id == task.id,
+            ProjectTaskReview.review_status == REVIEW_STATUS_WAITING_RESUBMISSION,
+        )
+    )
     db.add(task)
     db.commit()
     db.refresh(task)

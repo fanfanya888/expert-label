@@ -243,7 +243,7 @@ export function fetchMyTaskHall() {
 }
 
 export function fetchMyReviewProjects() {
-  return request<ProjectListResult>("/api/me/projects/review/queue");
+  return request<TaskHallListResult>("/api/me/projects/review/queue");
 }
 
 export function fetchMySubmissionRecords() {
@@ -274,6 +274,11 @@ export async function claimMyProjectReviewTask(projectId: number) {
     method: "POST",
     body: JSON.stringify({}),
   });
+  return data && typeof data === "object" ? data : null;
+}
+
+export async function fetchMyProjectCurrentReviewTask(projectId: number) {
+  const data = await request<ProjectTaskReviewTaskDetail | null>(`/api/me/projects/${projectId}/review-task/current`);
   return data && typeof data === "object" ? data : null;
 }
 

@@ -126,6 +126,12 @@ export interface TaskHallProjectItem extends ProjectItem {
   current_user_annotation_owned_count: number;
   current_user_task_id: string | null;
   current_user_task_status: string | null;
+  current_user_review_limit: number;
+  current_user_total_review_owned_count: number;
+  current_user_review_owned_count: number;
+  current_user_review_id: number | null;
+  current_user_review_task_id: string | null;
+  current_user_review_task_status: string | null;
   trial_passed: boolean;
   can_claim_annotation: boolean;
   can_claim_review: boolean;
@@ -137,16 +143,21 @@ export interface TaskHallListResult {
 }
 
 export interface UserSubmissionRecordItem {
+  submission_type: "annotation" | "review";
   plugin_code: string;
   plugin_name: string;
   submission_id: number;
   project_id: number | null;
   project_name: string | null;
   task_id: string;
+  current_status: string | null;
   submitted_at: string;
   title: string;
   summary: string | null;
   result_label: string | null;
+  review_round: number | null;
+  review_result: "pass" | "reject" | null;
+  review_comment: string | null;
 }
 
 export interface UserSubmissionRecordListResult {
@@ -196,15 +207,23 @@ export interface ProjectTaskReviewItem {
   reviewer_username: string | null;
   review_result: "pass" | "reject" | null;
   review_comment: string | null;
+  review_annotations: ProjectTaskReviewAnnotationItem[];
   claimed_at: string | null;
   submitted_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
+export interface ProjectTaskReviewAnnotationItem {
+  section_key: string;
+  section_label: string;
+  comment: string;
+}
+
 export interface ProjectTaskReviewSubmitPayload {
   review_result: "pass" | "reject";
   review_comment: string;
+  review_annotations: ProjectTaskReviewAnnotationItem[];
 }
 
 export interface ProjectTaskReviewTaskDetail {
@@ -313,6 +332,16 @@ export interface ModelResponseReviewSubmissionRecord {
   plugin_code: string;
   plugin_version: string;
   submitted_at: string;
+  latest_review: ModelResponseReviewLatestReview | null;
+}
+
+export interface ModelResponseReviewLatestReview {
+  review_id: number;
+  review_round: number;
+  review_result: "pass" | "reject" | null;
+  review_comment: string | null;
+  review_annotations: ProjectTaskReviewAnnotationItem[];
+  submitted_at: string | null;
 }
 
 export interface SingleTurnSearchCaseSchema {
@@ -548,6 +577,15 @@ export interface SingleTurnSearchCaseSubmissionSummary {
   submitted_at: string;
 }
 
+export interface SingleTurnSearchCaseLatestReview {
+  review_id: number;
+  review_round: number;
+  review_result: "pass" | "reject" | null;
+  review_comment: string | null;
+  review_annotations: ProjectTaskReviewAnnotationItem[];
+  submitted_at: string | null;
+}
+
 export interface SingleTurnSearchCaseSubmissionDetail extends SingleTurnSearchCaseSubmissionSummary {
   scenario_description: string;
   model_a: SearchCaseModelAnswer;
@@ -561,4 +599,5 @@ export interface SingleTurnSearchCaseSubmissionDetail extends SingleTurnSearchCa
   template_snapshot: Record<string, unknown>;
   plugin_code: string;
   plugin_version: string;
+  latest_review: SingleTurnSearchCaseLatestReview | null;
 }

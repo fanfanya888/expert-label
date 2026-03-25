@@ -1,10 +1,25 @@
 import { ArrowLeftOutlined, ReloadOutlined, SendOutlined, ThunderboltOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Empty, Form, Input, Popconfirm, Radio, Select, Space, Spin, Typography, message } from "antd";
+import {
+  Alert,
+  Button,
+  Card,
+  Empty,
+  Form,
+  Input,
+  Popconfirm,
+  Radio,
+  Select,
+  Space,
+  Spin,
+  Typography,
+  message,
+} from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import {
   fetchModelResponseReviewCurrentTask,
+  fetchModelResponseReviewMySubmissionDetail,
   fetchModelResponseReviewRubric,
   fetchModelResponseReviewSchema,
   generateModelResponseReviewTaskResponse,
@@ -16,9 +31,15 @@ import type {
   ModelResponseReviewRubric,
   ModelResponseReviewSchema,
   ModelResponseReviewSubmissionPayload,
+  ModelResponseReviewSubmissionRecord,
   ModelResponseReviewTaskItem,
 } from "../../types/api";
 import { readSession } from "../../utils/session";
+import {
+  buildModelResponseReviewCommentMap,
+  ModelResponseReviewCommentDrawer,
+  ModelResponseReviewSectionCard,
+} from "./modelResponseReviewWorkspace";
 
 interface ReviewFormValues {
   task_category: string;
@@ -97,12 +118,18 @@ export function ModelResponseReviewPage() {
   const [schema, setSchema] = useState<ModelResponseReviewSchema>(DEFAULT_MRR_SCHEMA);
   const [rubric, setRubric] = useState<ModelResponseReviewRubric>(DEFAULT_MRR_RUBRIC);
   const [currentTask, setCurrentTask] = useState<ModelResponseReviewTaskItem | null>(null);
+  const [latestSubmission, setLatestSubmission] = useState<ModelResponseReviewSubmissionRecord | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [releasing, setReleasing] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+
+  const latestReview = latestSubmission?.latest_review ?? null;
+  const reviewCommentMap = buildModelResponseReviewCommentMap(latestReview?.review_annotations);
+  const hasModuleComments = Object.values(reviewCommentMap).some((value) => Boolean(value?.trim()));
 
   const loadPageData = async ({ silent = false }: { silent?: boolean } = {}) => {
     const requestId = ++requestIdRef.current;
@@ -123,15 +150,24 @@ export function ModelResponseReviewPage() {
         return;
       }
 
+      const submissionDetail = taskData
+        ? await fetchModelResponseReviewMySubmissionDetail(projectIdNumber, taskData.task_id).catch(() => null)
+        : null;
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
       setCurrentTask(taskData);
+      setLatestSubmission(submissionDetail);
       setSchema(schemaData);
       setRubric(rubricData);
+      setCommentsOpen(false);
 
       if (taskData) {
         form.setFieldsValue({
-          task_category: taskData.task_category,
-          answer_rating: undefined,
-          rating_reason: "",
+          task_category: submissionDetail?.task_category || taskData.task_category,
+          answer_rating: submissionDetail?.answer_rating,
+          rating_reason: submissionDetail?.rating_reason || "",
         });
         form.setFields([
           { name: "task_category", errors: [] },
@@ -145,7 +181,7 @@ export function ModelResponseReviewPage() {
       if (requestId !== requestIdRef.current) {
         return;
       }
-      const errorMessage = error instanceof Error ? error.message : "加载试标任务失败，请稍后重试";
+      const errorMessage = error instanceof Error ? error.message : "加载标注任务失败，请稍后重试";
       setLoadError(errorMessage);
       if (!silent) {
         message.error(errorMessage);
@@ -203,7 +239,7 @@ export function ModelResponseReviewPage() {
   };
 
   const handleSubmit = async (values: ReviewFormValues) => {
-    if (!currentTask || !rubric || Number.isNaN(projectIdNumber) || projectIdNumber <= 0) {
+    if (!currentTask || Number.isNaN(projectIdNumber) || projectIdNumber <= 0) {
       message.error("当前没有可提交的任务");
       return;
     }
@@ -245,10 +281,10 @@ export function ModelResponseReviewPage() {
       }
 
       await submitModelResponseReviewSubmission(projectIdNumber, payload);
-      message.success("试标已提交，等待管理员审核");
+      message.success("标注已提交，任务已进入质检队列");
       navigate("/user/annotation-tasks", { replace: true });
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "提交试标失败";
+      const errorMessage = error instanceof Error ? error.message : "提交标注失败";
       message.error(errorMessage);
     } finally {
       setSubmitting(false);
@@ -261,7 +297,7 @@ export function ModelResponseReviewPage() {
         <Space direction="vertical" size={20} style={{ width: "100%" }}>
           <Card className="review-card">
             <Space direction="vertical" size={12} style={{ width: "100%" }}>
-              <Space wrap>
+              <Space wrap className="mrr-workspace__toolbar">
                 <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/user/annotation-tasks")}>
                   退出当前界面
                 </Button>
@@ -282,25 +318,44 @@ export function ModelResponseReviewPage() {
               </Space>
               <div>
                 <Typography.Title level={4} style={{ marginTop: 0, marginBottom: 8 }}>
-                  模型回答评审试标
+                  模型回答评审任务
                 </Typography.Title>
                 <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                  这里只保留试标必须的填写内容。提交后会回到标注任务页，项目状态会变成待审核。
+                  首次标注不需要写批注。若任务被质检打回，可通过右侧箭头拉出批注板块查看本轮修改意见。
                 </Typography.Paragraph>
               </div>
             </Space>
           </Card>
 
-          {loadError ? <Alert type="warning" showIcon message="加载试标任务失败" description={loadError} /> : null}
+          {hasModuleComments ? (
+            <ModelResponseReviewCommentDrawer
+              title="质检批注"
+              open={commentsOpen}
+              commentMap={reviewCommentMap}
+              description="按模块查看本轮质检意见。"
+              onToggle={() => setCommentsOpen((value) => !value)}
+            />
+          ) : null}
+
+          {latestReview?.review_result === "reject" ? (
+            <Alert
+              type="warning"
+              showIcon
+              message={`第 ${latestReview.review_round} 轮质检已打回`}
+              description={latestReview.review_comment || "请根据右侧批注修改后重新提交。"}
+            />
+          ) : null}
+
+          {loadError ? <Alert type="warning" showIcon message="加载标注任务失败" description={loadError} /> : null}
 
           {!currentTask ? (
             <Card className="review-card">
-              <Empty description="当前项目没有可继续处理的试标任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              <Empty description="当前项目没有可继续处理的标注任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             </Card>
           ) : (
             <Form form={form} layout="vertical" onFinish={handleSubmit}>
               <Space direction="vertical" size={18} style={{ width: "100%" }}>
-                <Card title="任务类型" className="review-card">
+                <ModelResponseReviewSectionCard title="任务类型">
                   <Form.Item
                     name="task_category"
                     rules={[{ required: true, message: "请选择任务类型" }]}
@@ -314,17 +369,16 @@ export function ModelResponseReviewPage() {
                       placeholder="请选择任务类型"
                     />
                   </Form.Item>
-                </Card>
+                </ModelResponseReviewSectionCard>
 
-                <Card title="Prompt" className="review-card">
+                <ModelResponseReviewSectionCard title="Prompt">
                   <Typography.Paragraph className="review-text-block" style={{ marginBottom: 0 }}>
                     {currentTask.prompt}
                   </Typography.Paragraph>
-                </Card>
+                </ModelResponseReviewSectionCard>
 
-                <Card
+                <ModelResponseReviewSectionCard
                   title="模型回答"
-                  className="review-card"
                   extra={
                     <Button
                       type={currentTask.model_reply ? "default" : "primary"}
@@ -346,10 +400,10 @@ export function ModelResponseReviewPage() {
                       type="info"
                       showIcon
                       message="当前任务还没有模型回答"
-                      description="点击右上角按钮后，平台会根据当前 Prompt 生成模型回答，再继续完成试标。"
+                      description="点击右上角按钮后，平台会根据当前 Prompt 生成模型回答，再继续完成标注。"
                     />
                   )}
-                </Card>
+                </ModelResponseReviewSectionCard>
 
                 <Card title="评审标准" className="review-card">
                   <Typography.Paragraph style={{ marginBottom: 16 }}>{rubric.intro}</Typography.Paragraph>
@@ -363,7 +417,7 @@ export function ModelResponseReviewPage() {
                   </Space>
                 </Card>
 
-                <Card title="回答评级" className="review-card">
+                <ModelResponseReviewSectionCard title="回答评级">
                   <Form.Item
                     name="answer_rating"
                     rules={[{ required: true, message: "请选择回答评级" }]}
@@ -379,9 +433,9 @@ export function ModelResponseReviewPage() {
                       </Space>
                     </Radio.Group>
                   </Form.Item>
-                </Card>
+                </ModelResponseReviewSectionCard>
 
-                <Card title="评级理由" className="review-card">
+                <ModelResponseReviewSectionCard title="评级理由">
                   <Form.Item
                     name="rating_reason"
                     rules={[{ required: true, message: "请填写评级理由" }]}
@@ -394,10 +448,10 @@ export function ModelResponseReviewPage() {
                       showCount
                     />
                   </Form.Item>
-                </Card>
+                </ModelResponseReviewSectionCard>
 
                 <Button type="primary" htmlType="submit" icon={<SendOutlined />} loading={submitting} size="large">
-                  提交试标
+                  提交标注
                 </Button>
               </Space>
             </Form>

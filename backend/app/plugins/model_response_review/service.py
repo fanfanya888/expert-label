@@ -8,15 +8,18 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.task_workflow import (
+    REVIEW_STATUS_SUBMITTED,
     TASK_COMPLETED_STATUSES,
     TASK_STATUS_ANNOTATION_IN_PROGRESS,
     TASK_STATUS_APPROVED,
     TASK_STATUS_PENDING_REVIEW_DISPATCH,
 )
+from app.crud.project_task_reviews import prepare_review_round_for_submission
 from app.crud.project_tasks import claim_annotation_task
 from app.models.model_response_review import ModelResponseReviewRecord
 from app.models.project import Project
 from app.models.project_task import ProjectTask
+from app.models.project_task_review import ProjectTaskReview
 from app.plugins.model_response_review.config import get_model_response_review_settings
 from app.plugins.model_response_review.rubric import (
     ANSWER_RATINGS,
@@ -24,7 +27,9 @@ from app.plugins.model_response_review.rubric import (
     get_review_rubric,
 )
 from app.plugins.model_response_review.schemas import (
+    ModelResponseReviewLatestReview,
     ModelResponseReviewProjectStats,
+    ModelResponseReviewReviewAnnotation,
     ModelResponseReviewSavedSubmission,
     ModelResponseReviewSchema,
     ModelResponseReviewSubmission,
@@ -315,8 +320,7 @@ class ModelResponseReviewService:
         task.task_status = TASK_STATUS_PENDING_REVIEW_DISPATCH
         task.annotation_submitted_at = datetime.now(timezone.utc)
         db.add(task)
-
-        db.commit()
+        prepare_review_round_for_submission(db, task)
         db.refresh(record)
         db.refresh(task)
 
@@ -354,22 +358,7 @@ class ModelResponseReviewService:
 
         items = list(db.scalars(statement).all())
         return [
-            ModelResponseReviewSubmissionRecord(
-                submission_id=item.id,
-                project_id=item.project_id,
-                task_id=item.task_id,
-                annotator_id=item.annotator_id,
-                task_category=item.task_category,
-                answer_rating=item.answer_rating,
-                rating_reason=item.rating_reason,
-                prompt_snapshot=item.prompt_snapshot,
-                model_reply_snapshot=item.model_reply_snapshot,
-                rubric_version=item.rubric_version,
-                metadata=item.record_metadata,
-                plugin_code=item.plugin_code,
-                plugin_version=item.plugin_version,
-                submitted_at=item.submitted_at,
-            )
+            self._build_submission_record(item)
             for item in items
         ]
 
@@ -391,7 +380,12 @@ class ModelResponseReviewService:
         )
         if not items:
             return None
-        return items[0]
+        item = items[0]
+        return item.model_copy(
+            update={
+                "latest_review": self._get_latest_review_feedback(db, project_id, task_id),
+            }
+        )
 
     def get_submission_detail(
         self,
@@ -411,21 +405,9 @@ class ModelResponseReviewService:
         )
         if item is None:
             return None
-        return ModelResponseReviewSubmissionRecord(
-            submission_id=item.id,
-            project_id=item.project_id,
-            task_id=item.task_id,
-            annotator_id=item.annotator_id,
-            task_category=item.task_category,
-            answer_rating=item.answer_rating,
-            rating_reason=item.rating_reason,
-            prompt_snapshot=item.prompt_snapshot,
-            model_reply_snapshot=item.model_reply_snapshot,
-            rubric_version=item.rubric_version,
-            metadata=item.record_metadata,
-            plugin_code=item.plugin_code,
-            plugin_version=item.plugin_version,
-            submitted_at=item.submitted_at,
+        return self._build_submission_record(
+            item,
+            latest_review=self._get_latest_review_feedback(db, project_id, item.task_id),
         )
 
     def delete_task_records(self, db: Session, project_id: int, task_id: str) -> None:
@@ -442,6 +424,63 @@ class ModelResponseReviewService:
 
     def get_rubric_snapshot(self) -> dict[str, Any]:
         return get_review_rubric()
+
+    def _build_submission_record(
+        self,
+        item: ModelResponseReviewRecord,
+        *,
+        latest_review: ModelResponseReviewLatestReview | None = None,
+    ) -> ModelResponseReviewSubmissionRecord:
+        return ModelResponseReviewSubmissionRecord(
+            submission_id=item.id,
+            project_id=item.project_id,
+            task_id=item.task_id,
+            annotator_id=item.annotator_id,
+            task_category=item.task_category,
+            answer_rating=item.answer_rating,
+            rating_reason=item.rating_reason,
+            prompt_snapshot=item.prompt_snapshot,
+            model_reply_snapshot=item.model_reply_snapshot,
+            rubric_version=item.rubric_version,
+            metadata=item.record_metadata,
+            plugin_code=item.plugin_code,
+            plugin_version=item.plugin_version,
+            submitted_at=item.submitted_at,
+            latest_review=latest_review,
+        )
+
+    def _get_latest_review_feedback(
+        self,
+        db: Session,
+        project_id: int,
+        task_id: str,
+    ) -> ModelResponseReviewLatestReview | None:
+        task = self._get_task(db, project_id, task_id)
+        if task is None:
+            return None
+
+        review = db.scalar(
+            select(ProjectTaskReview)
+            .where(
+                ProjectTaskReview.project_task_id == task.id,
+                ProjectTaskReview.review_status == REVIEW_STATUS_SUBMITTED,
+            )
+            .order_by(ProjectTaskReview.review_round.desc(), ProjectTaskReview.id.desc())
+        )
+        if review is None:
+            return None
+
+        return ModelResponseReviewLatestReview(
+            review_id=review.id,
+            review_round=review.review_round,
+            review_result=review.review_result,
+            review_comment=review.review_comment,
+            review_annotations=[
+                ModelResponseReviewReviewAnnotation.model_validate(item)
+                for item in (review.review_annotations or [])
+            ],
+            submitted_at=review.submitted_at,
+        )
 
     def _get_task(self, db: Session, project_id: int, task_id: str) -> ProjectTask | None:
         return db.scalar(

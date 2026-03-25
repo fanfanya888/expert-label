@@ -43,9 +43,8 @@ export function ConsoleLayout({
   const location = useLocation();
   const navigate = useNavigate();
   const session = readSession();
-  const selectedKey =
-    menuItems.find((item) => location.pathname.startsWith(item.key))?.key ?? defaultKey;
-  const pageTitle = pageTitles[selectedKey] ?? "平台";
+  const selectedKey = menuItems.find((item) => location.pathname.startsWith(item.key))?.key;
+  const pageTitle = selectedKey ? pageTitles[selectedKey] ?? "平台" : "平台";
 
   const handleLogout = async () => {
     try {
@@ -69,7 +68,7 @@ export function ConsoleLayout({
         </div>
         <Menu
           mode="inline"
-          selectedKeys={[selectedKey]}
+          selectedKeys={selectedKey ? [selectedKey] : [defaultKey]}
           items={menuItems as MenuProps["items"]}
           onClick={({ key }) => navigate(key)}
           className="app-shell__menu"

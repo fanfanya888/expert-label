@@ -40,6 +40,12 @@ class ProjectTaskList(ListResult):
     items: list[ProjectTaskRead]
 
 
+class ProjectTaskReviewAnnotationItem(BaseModel):
+    section_key: str = Field(min_length=1, max_length=100)
+    section_label: str = Field(min_length=1, max_length=100)
+    comment: str = Field(min_length=1, max_length=2000)
+
+
 class ProjectTaskReviewRead(ORMModel):
     id: int
     project_task_id: int
@@ -49,6 +55,7 @@ class ProjectTaskReviewRead(ORMModel):
     reviewer_username: str | None = None
     review_result: str | None
     review_comment: str | None
+    review_annotations: list[ProjectTaskReviewAnnotationItem] = Field(default_factory=list)
     claimed_at: datetime | None
     submitted_at: datetime | None
     created_at: datetime
@@ -58,6 +65,7 @@ class ProjectTaskReviewRead(ORMModel):
 class ProjectTaskReviewSubmit(BaseModel):
     review_result: str = Field(pattern="^(pass|reject)$")
     review_comment: str = Field(min_length=1, max_length=2000)
+    review_annotations: list[ProjectTaskReviewAnnotationItem] = Field(default_factory=list)
 
 
 class ProjectTaskReviewTaskDetail(BaseModel):

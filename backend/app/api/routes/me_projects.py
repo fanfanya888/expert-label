@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_annotator_user, require_end_user, require_reviewer_user
+from app.core.task_workflow import REVIEW_OWNED_STATUSES
 from app.core.response import build_response, serialize_schema
 from app.crud.project_task_reviews import (
     build_project_task_review_payload,
@@ -47,6 +48,14 @@ router = APIRouter(
 )
 
 
+def _resolve_plugin_name(plugin_code: str | None) -> str:
+    if plugin_code == "model_response_review":
+        return "模型回答评审"
+    if plugin_code == "single_turn_search_case":
+        return "单轮日常搜索边界评测 Case"
+    return plugin_code or "未知插件"
+
+
 def _get_review_projects_for_user(db: Session, user_id: int) -> list[Project]:
     statement = (
         select(Project)
@@ -55,13 +64,8 @@ def _get_review_projects_for_user(db: Session, user_id: int) -> list[Project]:
         .where(
             Project.is_published.is_(True),
             Project.is_visible.is_(True),
-            or_(
-                ProjectTaskReview.review_status == "pending",
-                (
-                    (ProjectTaskReview.review_status == "in_progress")
-                    & (ProjectTaskReview.reviewer_id == user_id)
-                ),
-            ),
+            ProjectTaskReview.review_status.in_(REVIEW_OWNED_STATUSES),
+            ProjectTaskReview.reviewer_id == user_id,
         )
         .distinct()
         .order_by(Project.published_at.desc().nullslast(), Project.id.desc())
@@ -141,9 +145,27 @@ def _build_project_hall_read(
                 if stats.get("current_user_task_status") is not None
                 else None
             ),
+            "current_user_review_limit": int(stats.get("current_user_review_limit", 3)),
+            "current_user_total_review_owned_count": int(stats.get("current_user_total_review_owned_count", 0)),
+            "current_user_review_owned_count": int(stats.get("current_user_review_owned_count", 0)),
+            "current_user_review_id": (
+                int(stats["current_user_review_id"])
+                if stats.get("current_user_review_id") is not None
+                else None
+            ),
+            "current_user_review_task_id": (
+                str(stats["current_user_review_task_id"])
+                if stats.get("current_user_review_task_id") is not None
+                else None
+            ),
+            "current_user_review_task_status": (
+                str(stats["current_user_review_task_status"])
+                if stats.get("current_user_review_task_status") is not None
+                else None
+            ),
             "trial_passed": bool(stats.get("trial_passed", False)),
             "can_claim_annotation": bool(stats.get("can_claim_annotation", False)) and current_user.can_annotate,
-            "can_claim_review": int(stats.get("review_available_count", 0)) > 0 and current_user.can_review,
+            "can_claim_review": bool(stats.get("can_claim_review", False)) and current_user.can_review,
         }
     )
 
@@ -203,6 +225,29 @@ def _build_review_task_detail(
     )
 
 
+def _get_current_review_for_user(
+    db: Session,
+    *,
+    project_id: int,
+    user_id: int,
+) -> tuple[ProjectTaskReview, ProjectTask] | None:
+    row = db.execute(
+        select(ProjectTaskReview, ProjectTask)
+        .join(ProjectTask, ProjectTask.id == ProjectTaskReview.project_task_id)
+        .where(
+            ProjectTask.project_id == project_id,
+            ProjectTask.publish_status == "published",
+            ProjectTask.is_visible.is_(True),
+            ProjectTaskReview.reviewer_id == user_id,
+            ProjectTaskReview.review_status == "in_progress",
+        )
+        .order_by(ProjectTaskReview.claimed_at.desc().nullslast(), ProjectTaskReview.id.desc())
+    ).first()
+    if row is None:
+        return None
+    return row
+
+
 def _build_my_submission_records(
     db: Session,
     *,
@@ -210,62 +255,108 @@ def _build_my_submission_records(
     skip: int,
     limit: int,
 ) -> UserSubmissionRecordList:
-    total_mrr = int(
-        db.scalar(
-            select(func.count())
-            .select_from(ModelResponseReviewRecord)
-            .where(ModelResponseReviewRecord.annotator_id == user_id)
-        )
-        or 0
-    )
-    total_search_case = int(
-        db.scalar(
-            select(func.count())
-            .select_from(SingleTurnSearchCaseRecord)
-            .where(SingleTurnSearchCaseRecord.annotator_id == user_id)
-        )
-        or 0
-    )
-    fetch_limit = max(skip + limit, limit, 1)
-
-    mrr_items = list(
+    raw_mrr_items = list(
         db.scalars(
             select(ModelResponseReviewRecord)
             .where(ModelResponseReviewRecord.annotator_id == user_id)
             .order_by(ModelResponseReviewRecord.submitted_at.desc(), ModelResponseReviewRecord.id.desc())
-            .limit(fetch_limit)
         ).all()
     )
-    search_case_items = list(
+    raw_search_case_items = list(
         db.scalars(
             select(SingleTurnSearchCaseRecord)
             .where(SingleTurnSearchCaseRecord.annotator_id == user_id)
             .order_by(SingleTurnSearchCaseRecord.submitted_at.desc(), SingleTurnSearchCaseRecord.id.desc())
-            .limit(fetch_limit)
         ).all()
     )
+    raw_review_rows = list(
+        db.execute(
+            select(ProjectTaskReview, ProjectTask)
+            .join(ProjectTask, ProjectTask.id == ProjectTaskReview.project_task_id)
+            .where(
+                ProjectTaskReview.reviewer_id == user_id,
+                ProjectTaskReview.review_status == "submitted",
+                ProjectTaskReview.submitted_at.is_not(None),
+            )
+            .order_by(ProjectTaskReview.submitted_at.desc(), ProjectTaskReview.id.desc())
+        ).all()
+    )
+
+    mrr_items: list[ModelResponseReviewRecord] = []
+    seen_mrr_keys: set[tuple[int | None, str]] = set()
+    for item in raw_mrr_items:
+        key = (item.project_id, item.task_id)
+        if key in seen_mrr_keys:
+            continue
+        seen_mrr_keys.add(key)
+        mrr_items.append(item)
+
+    search_case_items: list[SingleTurnSearchCaseRecord] = []
+    seen_search_case_keys: set[tuple[int | None, str]] = set()
+    for item in raw_search_case_items:
+        key = (item.project_id, item.task_id)
+        if key in seen_search_case_keys:
+            continue
+        seen_search_case_keys.add(key)
+        search_case_items.append(item)
+
+    review_rows: list[tuple[ProjectTaskReview, ProjectTask]] = []
+    seen_review_keys: set[tuple[int, str]] = set()
+    for review, task in raw_review_rows:
+        key = (task.project_id, task.external_task_id)
+        if key in seen_review_keys:
+            continue
+        seen_review_keys.add(key)
+        review_rows.append((review, task))
 
     project_ids = {
         item.project_id
         for item in [*mrr_items, *search_case_items]
         if item.project_id is not None
     }
+    project_ids.update(task.project_id for _, task in review_rows)
     project_name_map = {
         item.id: item.name
         for item in db.scalars(select(Project).where(Project.id.in_(project_ids))).all()
     } if project_ids else {}
+
+    task_keys = {
+        (int(item.project_id), item.task_id)
+        for item in [*mrr_items, *search_case_items]
+        if item.project_id is not None
+    }
+    task_status_map: dict[tuple[int, str], str] = {}
+    if task_keys:
+        task_rows = list(
+            db.scalars(
+                select(ProjectTask).where(
+                    ProjectTask.project_id.in_([project_id for project_id, _ in task_keys]),
+                    ProjectTask.external_task_id.in_([task_id for _, task_id in task_keys]),
+                )
+            ).all()
+        )
+        task_status_map = {
+            (task.project_id, task.external_task_id): task.task_status
+            for task in task_rows
+        }
 
     records: list[UserSubmissionRecordRead] = []
     for item in mrr_items:
         title = item.prompt_snapshot.strip()[:80] or item.task_id
         records.append(
             UserSubmissionRecordRead(
+                submission_type="annotation",
                 plugin_code=item.plugin_code,
-                plugin_name="模型回答评审",
+                plugin_name=_resolve_plugin_name(item.plugin_code),
                 submission_id=item.id,
                 project_id=item.project_id,
                 project_name=project_name_map.get(item.project_id) if item.project_id is not None else None,
                 task_id=item.task_id,
+                current_status=(
+                    task_status_map.get((item.project_id, item.task_id))
+                    if item.project_id is not None
+                    else None
+                ),
                 submitted_at=item.submitted_at,
                 title=title,
                 summary=item.task_category,
@@ -277,12 +368,18 @@ def _build_my_submission_records(
         title = item.prompt.strip()[:80] or item.task_id
         records.append(
             UserSubmissionRecordRead(
+                submission_type="annotation",
                 plugin_code=item.plugin_code,
-                plugin_name="单轮日常搜索边界评测 Case",
+                plugin_name=_resolve_plugin_name(item.plugin_code),
                 submission_id=item.id,
                 project_id=item.project_id,
                 project_name=project_name_map.get(item.project_id) if item.project_id is not None else None,
                 task_id=item.task_id,
+                current_status=(
+                    task_status_map.get((item.project_id, item.task_id))
+                    if item.project_id is not None
+                    else None
+                ),
                 submitted_at=item.submitted_at,
                 title=title,
                 summary=f"{item.domain} / {item.timeliness_tag}",
@@ -290,11 +387,37 @@ def _build_my_submission_records(
             )
         )
 
+    for review, task in review_rows:
+        records.append(
+            UserSubmissionRecordRead(
+                submission_type="review",
+                plugin_code=task.plugin_code,
+                plugin_name=_resolve_plugin_name(task.plugin_code),
+                submission_id=review.id,
+                project_id=task.project_id,
+                project_name=project_name_map.get(task.project_id),
+                task_id=task.external_task_id,
+                current_status=task.task_status,
+                submitted_at=review.submitted_at or review.updated_at,
+                title=f"质检任务 {task.external_task_id}",
+                summary=f"第 {review.review_round} 轮质检",
+                result_label=(
+                    "通过"
+                    if review.review_result == "pass"
+                    else "不通过"
+                    if review.review_result == "reject"
+                    else None
+                ),
+                review_round=review.review_round,
+                review_result=review.review_result,
+                review_comment=review.review_comment,
+            )
+        )
+
     records.sort(key=lambda item: (item.submitted_at, item.submission_id), reverse=True)
-    sliced = records[skip : skip + limit]
     return UserSubmissionRecordList(
-        total=total_mrr + total_search_case,
-        items=sliced,
+        total=len(records),
+        items=records[skip : skip + limit],
     )
 
 
@@ -348,11 +471,18 @@ def list_my_review_projects(
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     items = _get_review_projects_for_user(db, current_user.id)
-    stats_map = get_project_task_stats_map(db, [item.id for item in items], visible_only=True)
-    data = ProjectList(
+    project_ids = [item.id for item in items]
+    stats_map = get_project_task_stats_map(db, project_ids, visible_only=True)
+    hall_stats_map = get_project_task_hall_stats_map(db, project_ids, user_id=current_user.id)
+    data = ProjectHallList(
         total=len(items),
         items=[
-            ProjectRead.model_validate(build_project_payload(item, stats_map.get(item.id)))
+            _build_project_hall_read(
+                item,
+                project_stats=stats_map.get(item.id),
+                hall_stats=hall_stats_map.get(item.id),
+                current_user=current_user,
+            )
             for item in items
         ],
     )
@@ -363,7 +493,7 @@ def list_my_review_projects(
 def list_my_submission_records(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
-    current_user: User = Depends(require_annotator_user),
+    current_user: User = Depends(require_end_user),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     data = _build_my_submission_records(
@@ -436,7 +566,10 @@ def claim_my_review_task(
     if project is None or not project.is_published or not project.is_visible:
         raise HTTPException(status_code=404, detail="项目不存在")
 
-    review = claim_review_task(db, project_id=project_id, user_id=current_user.id)
+    try:
+        review = claim_review_task(db, project_id=project_id, user_id=current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if review is None:
         return build_response(data=None)
 
@@ -444,6 +577,29 @@ def claim_my_review_task(
     if task is None:
         return build_response(data=None)
 
+    data = _build_review_task_detail(db, project_id, review, task)
+    return build_response(data=serialize_schema(data))
+
+
+@router.get("/{project_id:int}/review-task/current")
+def get_my_current_review_task(
+    project_id: int,
+    current_user: User = Depends(require_reviewer_user),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    project = get_project_by_id(db, project_id)
+    if project is None or not project.is_published or not project.is_visible:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    current_review = _get_current_review_for_user(
+        db,
+        project_id=project_id,
+        user_id=current_user.id,
+    )
+    if current_review is None:
+        return build_response(data=None)
+
+    review, task = current_review
     data = _build_review_task_detail(db, project_id, review, task)
     return build_response(data=serialize_schema(data))
 
@@ -476,6 +632,7 @@ def submit_my_review_task(
             reviewer_id=current_user.id,
             review_result=payload.review_result,
             review_comment=payload.review_comment,
+            review_annotations=[item.model_dump(mode="json") for item in payload.review_annotations],
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

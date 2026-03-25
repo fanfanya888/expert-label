@@ -48,9 +48,9 @@ export default function App() {
             <Route path="submission-records" element={<SubmissionRecordsPage />} />
             <Route path="review-tasks" element={<ReviewTasksPage />} />
             <Route path="projects/:projectId/workspace" element={<ProjectWorkspacePage />} />
-            <Route path="projects/:projectId/review" element={<ProjectReviewPage />} />
           </Route>
 
+          <Route path="/user/projects/:projectId/review" element={<ProjectReviewPage />} />
           <Route path="/user/projects/:projectId/model-response-review" element={<ModelResponseReviewPage />} />
           <Route
             path="/user/projects/:projectId/model-response-review/submissions/:taskId"

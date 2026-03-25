@@ -27,12 +27,14 @@ import {
   Popconfirm,
   message,
 } from "antd";
+import type { FormInstance, FormProps } from "antd";
 import type { UploadFile } from "antd/es/upload/interface";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import {
   fetchSingleTurnSearchCaseCurrentTask,
+  fetchSingleTurnSearchCaseMySubmissionDetail,
   fetchSingleTurnSearchCaseSchema,
   releaseMyProjectAnnotationTask,
   reviewSingleTurnSearchCaseModelAWithAi,
@@ -55,10 +57,15 @@ import type {
   SingleTurnSearchCaseAiRuleCheckResponse,
   SingleTurnSearchCaseSchema,
   SingleTurnSearchCaseSubmissionPayload,
-  SingleTurnSearchCaseSubmissionResult,
+  SingleTurnSearchCaseSubmissionDetail,
   SingleTurnSearchCaseTaskItem,
+  SingleTurnSearchCaseValidationIssue,
 } from "../../types/api";
 import { readSession } from "../../utils/session";
+import {
+  buildSingleTurnSearchCaseCommentMap,
+  SingleTurnSearchCaseCommentDrawer,
+} from "./singleTurnSearchCaseReviewWorkspace";
 
 interface SearchCaseRuleFormItem {
   rule_category: string;
@@ -269,16 +276,152 @@ function buildScorePreview(rules: SearchCaseRuleFormItem[]): SearchCaseScoreSumm
   };
 }
 
-function mapFirstValidationError(field: string): string {
-  if (field.includes("domain")) return "题目领域必填";
-  if (field.includes("scenario_description")) return "场景说明必填";
-  if (field.includes("prompt")) return "Prompt 必填";
-  if (field.includes("timeliness_tag")) return "时效性标签必填";
-  if (field.includes("reference_answer")) return "参考答案必填";
-  if (field.includes("model_a")) return "请补全模型一信息";
-  if (field.includes("model_b")) return "请补全模型二信息";
-  if (field.includes("scoring_rules")) return "评分规则不满足要求";
-  return "请检查提交内容";
+function buildFormValuesFromSubmission(detail: SingleTurnSearchCaseSubmissionDetail): SearchCaseFormValues {
+  return {
+    domain: detail.domain,
+    scenario_description: detail.scenario_description,
+    prompt: detail.prompt,
+    timeliness_tag: detail.timeliness_tag,
+    model_a_response_text: detail.model_a.response_text,
+    model_a_share_link: detail.model_a.share_link,
+    model_a_screenshot: detail.model_a.screenshot,
+    model_b_response_text: detail.model_b.response_text,
+    model_b_share_link: detail.model_b.share_link,
+    model_b_screenshot: detail.model_b.screenshot,
+    reference_answer: detail.reference_answer,
+    rules: detail.scoring_rules.map((rule, index) => ({
+      rule_category: rule.rule_category,
+      rule_text: rule.rule_text,
+      weight: rule.weight,
+      evidence_source_type: rule.evidence_source_type,
+      reference_url: rule.reference_url || "",
+      quote_text: rule.quote_text || "",
+      evidence_screenshot: rule.evidence_screenshot || "",
+      optional_note: rule.optional_note || "",
+      model_a_hit: detail.model_a_evaluations.find((item) => item.rule_index === index)?.hit,
+      model_a_note: detail.model_a_evaluations.find((item) => item.rule_index === index)?.note || "",
+      model_b_hit: detail.model_b_evaluations.find((item) => item.rule_index === index)?.hit,
+      model_b_note: detail.model_b_evaluations.find((item) => item.rule_index === index)?.note || "",
+    })),
+  };
+}
+
+function resolveValidationFieldName(field: string): string | (string | number)[] | null {
+  const parts = field.split(".");
+
+  if (field === "domain") return "domain";
+  if (field === "scenario_description") return "scenario_description";
+  if (field === "prompt") return "prompt";
+  if (field === "timeliness_tag") return "timeliness_tag";
+  if (field === "reference_answer") return "reference_answer";
+  if (field === "model_a.response_text") return "model_a_response_text";
+  if (field === "model_a.share_link") return "model_a_share_link";
+  if (field === "model_a.screenshot") return "model_a_screenshot";
+  if (field === "model_b.response_text") return "model_b_response_text";
+  if (field === "model_b.share_link") return "model_b_share_link";
+  if (field === "model_b.screenshot") return "model_b_screenshot";
+
+  if (parts[0] === "scoring_rules") {
+    if (parts.length >= 3 && !Number.isNaN(Number(parts[1]))) {
+      const ruleIndex = Number(parts[1]);
+      const fieldMap: Record<string, string> = {
+        rule_category: "rule_category",
+        rule_text: "rule_text",
+        weight: "weight",
+        evidence_source_type: "evidence_source_type",
+        reference_url: "reference_url",
+        quote_text: "quote_text",
+        evidence_screenshot: "evidence_screenshot",
+        optional_note: "optional_note",
+      };
+      const mappedField = fieldMap[parts[2]];
+      if (mappedField) {
+        return ["rules", ruleIndex, mappedField];
+      }
+    }
+    return ["rules", 0, "rule_category"];
+  }
+
+  if (field === "model_a_evaluations") return ["rules", 0, "model_a_hit"];
+  if (field === "model_b_evaluations") return ["rules", 0, "model_b_hit"];
+
+  return null;
+}
+
+function scrollToValidationField(
+  form: FormInstance<SearchCaseFormValues>,
+  field: string,
+) {
+  const fieldName = resolveValidationFieldName(field);
+  if (!fieldName) {
+    return;
+  }
+  form.scrollToField(fieldName, {
+    behavior: "smooth",
+    block: "center",
+  });
+}
+
+function buildValidationErrorMessage(
+  issue: SingleTurnSearchCaseValidationIssue,
+  currentTask: SingleTurnSearchCaseTaskItem,
+  rules: SearchCaseRuleInput[],
+): string {
+  const { field, message: issueMessage } = issue;
+  const fieldParts = field.split(".");
+
+  if (field === "domain") return "题目领域未填写或不在允许范围内";
+  if (field === "scenario_description") return "场景说明未填写";
+  if (field === "prompt") return "Prompt 未填写";
+  if (field === "timeliness_tag") return "时效标签未填写或不在允许范围内";
+  if (field === "reference_answer") return "参考答案未填写";
+  if (field === "model_a.response_text") return "模型一回复全文未填写";
+  if (field === "model_a.share_link") return "模型一分享链接未填写";
+  if (field === "model_a.screenshot") return "模型一截图未上传";
+  if (field === "model_b.response_text") return "模型二回复全文未填写";
+  if (field === "model_b.share_link") return "模型二分享链接未填写";
+  if (field === "model_b.screenshot") return "模型二截图未上传";
+
+  if (field === "scoring_rules") {
+    if (issueMessage === "rule count is out of configured range") {
+      return `评分规则数量不符合要求：当前 ${rules.length} 条，需在 ${currentTask.scoring_rules_min}-${currentTask.scoring_rules_max} 条之间`;
+    }
+    if (issueMessage === "penalty rule count is below minimum") {
+      const penaltyCount = rules.filter((item) => item.weight < 0).length;
+      return `评分规则中的扣分项不足：当前 ${penaltyCount} 条，至少需要 ${currentTask.min_penalty_rules} 条`;
+    }
+    if (issueMessage === "at least one positive rule is required") {
+      return "评分规则中至少需要 1 条正向规则，权重必须大于 0";
+    }
+    return `评分规则未通过校验：${issueMessage}`;
+  }
+
+  if (field.startsWith("scoring_rules.") && fieldParts.length >= 3 && !Number.isNaN(Number(fieldParts[1]))) {
+    const ruleIndex = Number(fieldParts[1]) + 1;
+    const ruleField = fieldParts[2];
+    if (ruleField === "rule_category") return `评分规则 ${ruleIndex} 的规则分类未填写`;
+    if (ruleField === "rule_text") {
+      if (issueMessage.includes("atomic evaluation point")) {
+        return `评分规则 ${ruleIndex} 需要保持单一考点，不要混写多个判断条件`;
+      }
+      return `评分规则 ${ruleIndex} 的规则内容未填写`;
+    }
+    if (ruleField === "weight") return `评分规则 ${ruleIndex} 的权重不合法，必须是 -20 到 20 之间且不能为 0 的整数`;
+    if (ruleField === "evidence_source_type") return `评分规则 ${ruleIndex} 的证据来源未填写`;
+    if (ruleField === "reference_url") return `评分规则 ${ruleIndex} 的参考链接未填写`;
+    if (ruleField === "quote_text") return `评分规则 ${ruleIndex} 的引用说明未填写`;
+    if (ruleField === "evidence_screenshot") return `评分规则 ${ruleIndex} 的证据截图未上传`;
+    if (ruleField === "optional_note") return `评分规则 ${ruleIndex} 的补充说明未填写`;
+  }
+
+  if (field === "model_a_evaluations") {
+    return `评分规则区里缺少 ${currentTask.model_a_name} 的判定结果，请检查每条规则都已填写“是否命中”和“备注”`;
+  }
+  if (field === "model_b_evaluations") {
+    return `评分规则区里缺少 ${currentTask.model_b_name} 的判定结果，请检查每条规则都已填写“是否命中”和“备注”`;
+  }
+
+  return issueMessage || "请检查提交内容";
 }
 
 function buildRuleAiReviewPayload(
@@ -567,11 +710,12 @@ export function SingleTurnSearchCasePage() {
   const [schema, setSchema] = useState<SingleTurnSearchCaseSchema | null>(null);
   const stats = { completed_tasks: 0, total_tasks: 0 };
   const [currentTask, setCurrentTask] = useState<SingleTurnSearchCaseTaskItem | null>(null);
+  const [latestSubmission, setLatestSubmission] = useState<SingleTurnSearchCaseSubmissionDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [releasing, setReleasing] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [lastSubmission] = useState<SingleTurnSearchCaseSubmissionResult | null>(null);
   const [ruleDefinitionReviews, setRuleDefinitionReviews] = useState<Record<number, AiReviewState<SingleTurnSearchCaseAiRuleCheckResponse>>>({});
   const [modelAReviews, setModelAReviews] = useState<Record<number, AiReviewState<SingleTurnSearchCaseAiModelCheckResponse>>>({});
   const [modelBReviews, setModelBReviews] = useState<Record<number, AiReviewState<SingleTurnSearchCaseAiModelCheckResponse>>>({});
@@ -583,10 +727,15 @@ export function SingleTurnSearchCasePage() {
   const liveValues = (Form.useWatch([], form) ?? {}) as Partial<SearchCaseFormValues>;
   const softChecks = useMemo(() => buildSoftChecks(liveValues, currentTask), [liveValues, currentTask]);
   const scorePreview = useMemo(() => buildScorePreview(rules), [rules]);
+  const latestReview = latestSubmission?.latest_review ?? null;
+  const reviewCommentMap = buildSingleTurnSearchCaseCommentMap(latestReview?.review_annotations);
+  const hasModuleComments = Object.values(reviewCommentMap).some((value) => Boolean(value?.trim()));
 
   const resetPageState = () => {
     setSchema(DEFAULT_SEARCH_CASE_SCHEMA);
     setCurrentTask(null);
+    setLatestSubmission(null);
+    setCommentsOpen(false);
     setLoadError(null);
     setRuleDefinitionReviews({});
     setModelAReviews({});
@@ -609,16 +758,29 @@ export function SingleTurnSearchCasePage() {
         return;
       }
 
+      const submissionDetail = taskData
+        ? await fetchSingleTurnSearchCaseMySubmissionDetail(projectIdNumber, taskData.task_id).catch(() => null)
+        : null;
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
       setCurrentTask(taskData);
+      setLatestSubmission(submissionDetail);
+      setCommentsOpen(false);
 
       if (taskData) {
-        form.setFieldsValue({
-          domain: taskData.domain_options[0] ?? DEFAULT_SEARCH_CASE_SCHEMA.default_domain_options[0],
-          timeliness_tag: taskData.timeliness_options[0] ?? DEFAULT_SEARCH_CASE_SCHEMA.default_timeliness_options[0],
-          rules: Array.from({ length: taskData.scoring_rules_min }, () => buildEmptyRule()),
-          model_a_screenshot: "",
-          model_b_screenshot: "",
-        });
+        form.setFieldsValue(
+          submissionDetail
+            ? buildFormValuesFromSubmission(submissionDetail)
+            : {
+                domain: taskData.domain_options[0] ?? DEFAULT_SEARCH_CASE_SCHEMA.default_domain_options[0],
+                timeliness_tag: taskData.timeliness_options[0] ?? DEFAULT_SEARCH_CASE_SCHEMA.default_timeliness_options[0],
+                rules: Array.from({ length: taskData.scoring_rules_min }, () => buildEmptyRule()),
+                model_a_screenshot: "",
+                model_b_screenshot: "",
+              },
+        );
       } else {
         form.resetFields();
       }
@@ -842,6 +1004,19 @@ export function SingleTurnSearchCasePage() {
     }
   };
 
+  const handleFinishFailed: FormProps<SearchCaseFormValues>["onFinishFailed"] = ({ errorFields }) => {
+    const firstError = errorFields[0];
+    if (!firstError) {
+      return;
+    }
+
+    form.scrollToField(firstError.name, {
+      behavior: "smooth",
+      block: "center",
+    });
+    message.error(firstError.errors[0] || "请先补全未填写的内容");
+  };
+
   const handleSubmit = async (values: SearchCaseFormValues) => {
     if (!currentTask || Number.isNaN(projectIdNumber) || projectIdNumber <= 0) {
       message.error("当前没有可提交的任务模板");
@@ -903,7 +1078,12 @@ export function SingleTurnSearchCasePage() {
       const validation = await validateSingleTurnSearchCaseSubmission(projectIdNumber, payload);
       if (!validation.valid) {
         const firstIssue = validation.errors[0];
-        message.error(firstIssue ? mapFirstValidationError(firstIssue.field) : "提交内容未通过校验");
+        if (firstIssue) {
+          scrollToValidationField(form, firstIssue.field);
+          message.error(buildValidationErrorMessage(firstIssue, currentTask, scoringRules));
+        } else {
+          message.error("提交内容未通过校验");
+        }
         return;
       }
       await submitSingleTurnSearchCaseSubmission(projectIdNumber, payload);
@@ -978,17 +1158,42 @@ export function SingleTurnSearchCasePage() {
             )}
           </Card>
 
-          {lastSubmission ? (
+          {hasModuleComments ? (
+            <SingleTurnSearchCaseCommentDrawer
+              title="质检批注"
+              open={commentsOpen}
+              commentMap={reviewCommentMap}
+              description="按模块查看本轮质检意见。"
+              onToggle={() => setCommentsOpen((value) => !value)}
+            />
+          ) : null}
+
+          {latestReview?.review_result === "reject" ? (
+            <Alert
+              type="warning"
+              showIcon
+              message={`第 ${latestReview.review_round} 轮质检已打回`}
+              description={latestReview.review_comment || "请根据右侧批注修改后重新提交。"}
+            />
+          ) : null}
+
+          {latestSubmission ? (
             <Alert
               type="success"
               showIcon
-              message={`最近一次提交成功，记录编号 ${lastSubmission.submission_id}`}
-              description={`模型一 ${lastSubmission.score_summary.model_a_percentage}% / 模型二 ${lastSubmission.score_summary.model_b_percentage}% / 分差 ${lastSubmission.score_summary.score_gap}%`}
+              message={`最近一次提交成功，记录编号 ${latestSubmission.submission_id}`}
+              description={`模型一 ${latestSubmission.score_summary.model_a_percentage}% / 模型二 ${latestSubmission.score_summary.model_b_percentage}% / 分差 ${latestSubmission.score_summary.score_gap}%`}
             />
           ) : null}
 
           {!currentTask ? null : (
-            <Form form={form} layout="vertical" onFinish={handleSubmit}>
+            <Form
+              form={form}
+              layout="vertical"
+              onFinish={handleSubmit}
+              onFinishFailed={handleFinishFailed}
+              scrollToFirstError={{ behavior: "smooth", block: "center" }}
+            >
               <Space direction="vertical" size={18} style={{ width: "100%" }}>
                 <Card className="search-case-card" title="出题信息区">
                   <Row gutter={16}>

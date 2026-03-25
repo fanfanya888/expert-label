@@ -24,13 +24,6 @@ export function UserLayout() {
       label: "标注任务",
     });
     pageTitles["/user/annotation-tasks"] = "标注任务";
-
-    menuItems.push({
-      key: "/user/submission-records",
-      icon: <AppstoreOutlined />,
-      label: "提交记录",
-    });
-    pageTitles["/user/submission-records"] = "提交记录";
   }
 
   if (session?.user.can_review) {
@@ -42,6 +35,15 @@ export function UserLayout() {
     pageTitles["/user/review-tasks"] = "质检任务";
   }
 
+  if (session?.user.can_annotate || session?.user.can_review) {
+    menuItems.push({
+      key: "/user/submission-records",
+      icon: <AppstoreOutlined />,
+      label: "提交记录",
+    });
+    pageTitles["/user/submission-records"] = "提交记录";
+  }
+
   const defaultKey = menuItems[0]?.key || "/user/task-hall";
 
   return (
@@ -49,7 +51,7 @@ export function UserLayout() {
       portal="user"
       badgeText="用户工作台"
       brandSubtitle="用户端"
-      headerSubtitle="先在任务大厅查看可领取任务，再进入标注任务、提交记录和质检任务处理自己的工作。"
+      headerSubtitle="先在任务大厅领取任务，再进入标注任务、质检任务和提交记录处理自己的工作。"
       defaultKey={defaultKey}
       menuItems={menuItems}
       pageTitles={pageTitles}

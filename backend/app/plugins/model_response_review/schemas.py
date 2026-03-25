@@ -161,6 +161,21 @@ class ModelResponseReviewSavedSubmission(BaseModel):
     submitted_at: datetime
 
 
+class ModelResponseReviewReviewAnnotation(BaseModel):
+    section_key: str
+    section_label: str
+    comment: str
+
+
+class ModelResponseReviewLatestReview(BaseModel):
+    review_id: int
+    review_round: int
+    review_result: str | None = None
+    review_comment: str | None = None
+    review_annotations: list[ModelResponseReviewReviewAnnotation] = Field(default_factory=list)
+    submitted_at: datetime | None = None
+
+
 class ModelResponseReviewSubmissionRecord(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
@@ -178,3 +193,4 @@ class ModelResponseReviewSubmissionRecord(BaseModel):
     plugin_code: str
     plugin_version: str
     submitted_at: datetime
+    latest_review: ModelResponseReviewLatestReview | None = None

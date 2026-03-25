@@ -9,13 +9,16 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.task_workflow import (
+    REVIEW_STATUS_SUBMITTED,
     TASK_COMPLETED_STATUSES,
     TASK_STATUS_ANNOTATION_IN_PROGRESS,
     TASK_STATUS_PENDING_REVIEW_DISPATCH,
 )
+from app.crud.project_task_reviews import prepare_review_round_for_submission
 from app.crud.project_tasks import claim_annotation_task
 from app.models.project import Project
 from app.models.project_task import ProjectTask
+from app.models.project_task_review import ProjectTaskReview
 from app.models.single_turn_search_case_record import SingleTurnSearchCaseRecord
 from app.plugins.single_turn_search_case.config import get_single_turn_search_case_settings
 from app.plugins.single_turn_search_case.schemas import (
@@ -33,6 +36,7 @@ from app.plugins.single_turn_search_case.schemas import (
     SearchCaseRuleInput,
     SearchCaseScoreSummary,
     SearchCaseSoftCheck,
+    SingleTurnSearchCaseLatestReview,
     SingleTurnSearchCaseProjectStats,
     SingleTurnSearchCaseAiReviewRequest,
     SingleTurnSearchCaseSavedSubmission,
@@ -365,7 +369,7 @@ class SingleTurnSearchCaseService:
         task.task_status = TASK_STATUS_PENDING_REVIEW_DISPATCH
         task.annotation_submitted_at = datetime.now(timezone.utc)
         db.add(task)
-        db.commit()
+        prepare_review_round_for_submission(db, task)
         db.refresh(record)
         db.refresh(task)
 
@@ -422,7 +426,10 @@ class SingleTurnSearchCaseService:
         )
         if record is None:
             return None
-        return self._build_detail(record)
+        return self._build_detail(
+            record,
+            latest_review=self._get_latest_review_feedback(db, project_id, record.task_id),
+        )
 
     def get_task_submission_detail(
         self,
@@ -467,7 +474,10 @@ class SingleTurnSearchCaseService:
         )
         if record is None:
             return None
-        return self._build_detail(record)
+        return self._build_detail(
+            record,
+            latest_review=self._get_latest_review_feedback(db, project_id, record.task_id),
+        )
 
     def delete_task_records(self, db: Session, project_id: int, task_id: str) -> None:
         self.get_project_or_raise(db, project_id, require_published=False)
@@ -1272,7 +1282,42 @@ class SingleTurnSearchCaseService:
             submitted_at=record.submitted_at,
         )
 
-    def _build_detail(self, record: SingleTurnSearchCaseRecord) -> SingleTurnSearchCaseSubmissionDetail:
+    def _get_latest_review_feedback(
+        self,
+        db: Session,
+        project_id: int,
+        task_id: str,
+    ) -> SingleTurnSearchCaseLatestReview | None:
+        task = self._get_task(db, project_id, task_id)
+        if task is None:
+            return None
+
+        review = db.scalar(
+            select(ProjectTaskReview)
+            .where(
+                ProjectTaskReview.project_task_id == task.id,
+                ProjectTaskReview.review_status == REVIEW_STATUS_SUBMITTED,
+            )
+            .order_by(ProjectTaskReview.review_round.desc(), ProjectTaskReview.id.desc())
+        )
+        if review is None:
+            return None
+
+        return SingleTurnSearchCaseLatestReview(
+            review_id=review.id,
+            review_round=review.review_round,
+            review_result=review.review_result,
+            review_comment=review.review_comment,
+            review_annotations=list(review.review_annotations or []),
+            submitted_at=review.submitted_at,
+        )
+
+    def _build_detail(
+        self,
+        record: SingleTurnSearchCaseRecord,
+        *,
+        latest_review: SingleTurnSearchCaseLatestReview | None = None,
+    ) -> SingleTurnSearchCaseSubmissionDetail:
         return SingleTurnSearchCaseSubmissionDetail(
             **self._build_summary(record).model_dump(mode="json"),
             scenario_description=record.scenario_description,
@@ -1297,4 +1342,5 @@ class SingleTurnSearchCaseService:
             template_snapshot=record.template_snapshot,
             plugin_code=record.plugin_code,
             plugin_version=record.plugin_version,
+            latest_review=latest_review,
         )

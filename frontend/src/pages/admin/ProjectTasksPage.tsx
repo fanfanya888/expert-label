@@ -1,7 +1,6 @@
 import {
   ArrowLeftOutlined,
   CheckCircleOutlined,
-  EyeOutlined,
   FileSearchOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -38,7 +37,6 @@ import {
   dispatchAdminProjectTaskReview,
   fetchAdminProjectDetail,
   fetchAdminProjectTaskReviews,
-  fetchAdminProjectTaskSubmissions,
   fetchAdminProjectTasks,
   fetchModelResponseReviewSchema,
   fetchSingleTurnSearchCaseSchema,
@@ -49,7 +47,6 @@ import type {
   AdminProjectTaskCreatePayload,
   AdminProjectTaskItem,
   ModelResponseReviewSchema,
-  ModelResponseReviewSubmissionRecord,
   ModelResponseReviewTaskTemplatePayload,
   ProjectItem,
   ProjectTaskReviewItem,
@@ -150,7 +147,7 @@ function formatUserText(username: string | null | undefined, userId: number | nu
 }
 
 function canDispatchReview(task: AdminProjectTaskItem) {
-  return task.task_status === "pending_review_dispatch" || task.task_status === "review_submitted";
+  return task.task_status === "review_submitted";
 }
 
 function canApproveTask(task: AdminProjectTaskItem) {
@@ -200,9 +197,6 @@ export function ProjectTasksPage() {
   const [actionKey, setActionKey] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [submissionModalOpen, setSubmissionModalOpen] = useState(false);
-  const [submissionLoading, setSubmissionLoading] = useState(false);
-  const [submissionItems, setSubmissionItems] = useState<ModelResponseReviewSubmissionRecord[]>([]);
   const [reviewDrawerOpen, setReviewDrawerOpen] = useState(false);
   const [reviewDrawerTask, setReviewDrawerTask] = useState<AdminProjectTaskItem | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -219,8 +213,6 @@ export function ProjectTasksPage() {
     setSearchCaseSchema(null);
     setItems([]);
     setLoadError(null);
-    setSubmissionItems([]);
-    setSubmissionModalOpen(false);
     setReviewDrawerTask(null);
     setReviewItems([]);
     setReviewDrawerOpen(false);
@@ -381,10 +373,10 @@ export function ProjectTasksPage() {
     setActionKey(key);
     try {
       await dispatchAdminProjectTaskReview(projectIdNumber, task.id);
-      message.success("质检任务已发出");
+      message.success("质检轮次已追加");
       await loadPageData({ silent: true });
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "发起质检失败");
+      message.error(error instanceof Error ? error.message : "追加质检失败");
     } finally {
       setActionKey(null);
     }
@@ -425,20 +417,6 @@ export function ProjectTasksPage() {
         }
       },
     });
-  };
-
-  const openSubmissionModal = async (task: AdminProjectTaskItem) => {
-    setSubmissionModalOpen(true);
-    setSubmissionLoading(true);
-    try {
-      const records = await fetchAdminProjectTaskSubmissions(projectIdNumber, task.id);
-      setSubmissionItems((records as ModelResponseReviewSubmissionRecord[]) || []);
-    } catch (error) {
-      setSubmissionItems([]);
-      message.error(error instanceof Error ? error.message : "获取试标记录失败");
-    } finally {
-      setSubmissionLoading(false);
-    }
   };
 
   const openReviewDrawer = async (task: AdminProjectTaskItem) => {
@@ -486,14 +464,13 @@ export function ProjectTasksPage() {
       >
         {record.publish_status === "published" ? "下线" : "发布"}
       </Button>
-      {isModelResponseReview ? <Button icon={<EyeOutlined />} onClick={() => void openSubmissionModal(record)}>查看试标</Button> : null}
       <Button disabled={!canDispatchReview(record)} loading={actionKey === `dispatch-${record.id}`} onClick={() => void handleDispatchReview(record)}>
-        发起质检
+        追加质检
       </Button>
       <Button disabled={!canApproveTask(record)} loading={actionKey === `approve-${record.id}`} onClick={() => void handleApproveTask(record)}>
         质检通过
       </Button>
-      <Button icon={<EyeOutlined />} disabled={record.review_round_count === 0} onClick={() => void openReviewDrawer(record)}>
+      <Button disabled={record.review_round_count === 0} onClick={() => void openReviewDrawer(record)}>
         查看质检
       </Button>
       <Button danger loading={actionKey === `delete-${record.id}`} onClick={() => handleDeleteTask(record)}>
@@ -560,8 +537,8 @@ export function ProjectTasksPage() {
           <Typography.Title level={4} style={{ margin: 0 }}>{project ? `${project.name} / ${isSearchCase ? "模板管理" : "任务管理"}` : "任务管理"}</Typography.Title>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
             {isSearchCase
-              ? "这里管理搜索 Case 模板的发布和流转。用户先从共享任务池领取模板完成试标，管理员再按轮次发起质检，直到任务通过。"
-              : "这里管理试标任务的发布和流转。用户领取的是共享任务池中的独占任务，试标提交后由管理员发起质检并决定是否继续加轮或通过。"}
+              ? "这里管理搜索 Case 模板的发布和流转。用户先从共享任务池领取模板完成试标，提交后会自动进入质检队列，管理员只需要决定是否追加质检轮次或直接通过。"
+              : "这里管理试标任务的发布和流转。用户领取的是共享任务池中的独占任务，试标提交后会自动进入质检队列，管理员只需要决定是否继续加轮或通过。"}
           </Typography.Paragraph>
         </Space>
       </Card>
@@ -629,22 +606,6 @@ export function ProjectTasksPage() {
             <Form.Item label="Metadata JSON" name="metadata_json"><Input.TextArea rows={4} placeholder='可选，例如 {"difficulty":"easy","language":"en"}' /></Form.Item>
           </Form>
         )}
-      </Modal>
-
-      <Modal title="试标记录" open={submissionModalOpen} onCancel={() => setSubmissionModalOpen(false)} footer={null} width={960} destroyOnHidden>
-        <Table<ModelResponseReviewSubmissionRecord>
-          rowKey="submission_id"
-          loading={submissionLoading}
-          dataSource={submissionItems}
-          pagination={false}
-          locale={{ emptyText: <Empty description="暂无试标记录" /> }}
-          columns={[
-            { title: "提交时间", dataIndex: "submitted_at", width: 180, render: (value: string) => formatDateTime(value) },
-            { title: "试标人", dataIndex: "annotator_id", width: 100, render: (value: number | null) => (value ? `#${value}` : "-") },
-            { title: "评分", dataIndex: "answer_rating", width: 160 },
-            { title: "理由", dataIndex: "rating_reason", render: (value: string) => <Typography.Paragraph style={{ marginBottom: 0 }} ellipsis={{ rows: 2, expandable: true }}>{value}</Typography.Paragraph> },
-          ]}
-        />
       </Modal>
 
       <Drawer title={reviewDrawerTask ? `质检记录 / ${reviewDrawerTask.external_task_id}` : "质检记录"} width={860} open={reviewDrawerOpen} onClose={() => { setReviewDrawerOpen(false); setReviewDrawerTask(null); setReviewItems([]); }}>
