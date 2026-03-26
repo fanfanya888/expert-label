@@ -117,6 +117,14 @@ export interface ProjectDetailItem extends ProjectItem {
   instruction_markdown: string | null;
 }
 
+export interface ProjectInstructionAssetItem {
+  url: string;
+  filename: string;
+  content_type: string;
+  size: number;
+  original_filename: string;
+}
+
 export interface ProjectListResult {
   total: number;
   items: ProjectItem[];

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -28,6 +31,7 @@ class Settings(BaseSettings):
     postgres_user: str = "admin"
     postgres_password: str = "123456"
     redis_url: str | None = None
+    uploads_root: Path = Field(default_factory=lambda: BACKEND_ROOT / "uploads")
 
     model_config = SettingsConfigDict(
         env_file=".env",

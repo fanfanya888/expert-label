@@ -47,6 +47,7 @@ import {
   fetchSingleTurnSearchCaseSchema,
   publishAdminProjectTask,
   unpublishAdminProjectTask,
+  uploadAdminProjectInstructionAsset,
   updateAdminProjectInstruction,
 } from "../../services/api";
 import type {
@@ -125,15 +126,6 @@ function triggerFileDownload(blob: Blob, filename: string) {
   link.click();
   link.remove();
   window.setTimeout(() => window.URL.revokeObjectURL(downloadUrl), 0);
-}
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
 }
 
 function insertTextAtCursor(
@@ -258,6 +250,7 @@ export function ProjectTasksPage() {
   const [instructionDrawerOpen, setInstructionDrawerOpen] = useState(false);
   const [instructionDraft, setInstructionDraft] = useState("");
   const [instructionSaving, setInstructionSaving] = useState(false);
+  const [instructionImageUploading, setInstructionImageUploading] = useState(false);
   const [reviewDrawerOpen, setReviewDrawerOpen] = useState(false);
   const [reviewDrawerTask, setReviewDrawerTask] = useState<AdminProjectTaskItem | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -304,6 +297,7 @@ export function ProjectTasksPage() {
     setInstructionDrawerOpen(false);
     setInstructionDraft("");
     setInstructionSaving(false);
+    setInstructionImageUploading(false);
     setReviewDrawerTask(null);
     setReviewItems([]);
     setReviewDrawerOpen(false);
@@ -392,10 +386,16 @@ export function ProjectTasksPage() {
   };
 
   const handleInsertInstructionImage = async (file: File) => {
+    if (!project) {
+      message.error("项目详情还没有加载完成");
+      return;
+    }
+
+    setInstructionImageUploading(true);
     try {
-      const base64 = await fileToBase64(file);
-      const fileName = file.name.replace(/\s+/g, "-") || "image";
-      const markdownImage = `\n![${fileName}](${base64})\n`;
+      const uploadedAsset = await uploadAdminProjectInstructionAsset(project.id, file);
+      const altText = (uploadedAsset.original_filename || file.name || "image").replace(/\.[^.]+$/, "").trim() || "image";
+      const markdownImage = `\n![${altText}](${uploadedAsset.url})\n`;
       const textarea = instructionTextareaRef.current?.resizableTextArea?.textArea;
       const inserted = insertTextAtCursor(instructionDraft, markdownImage, textarea);
       setInstructionDraft(inserted.value);
@@ -410,9 +410,12 @@ export function ProjectTasksPage() {
           nextTextarea.setSelectionRange(inserted.selectionStart, inserted.selectionEnd);
         }
       });
-      message.success("图片 Markdown 已插入");
-    } catch {
-      message.error("图片读取失败，请重试");
+      message.success("图片已上传并插入 Markdown");
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "图片上传失败，请重试";
+      message.error(errorMessage);
+    } finally {
+      setInstructionImageUploading(false);
     }
   };
 
@@ -796,7 +799,7 @@ export function ProjectTasksPage() {
           <Col xs={24} xl={12}>
             <div className="project-instruction-editor">
               <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                管理员直接编辑 Markdown。目录导航会根据标题自动生成，图片会以内嵌 Markdown 图片语法插入。
+                管理员直接编辑 Markdown。目录导航会根据标题自动生成，图片上传后会保存到后端并插入短链接。
               </Typography.Paragraph>
               <Space wrap>
                 <Upload
@@ -807,7 +810,9 @@ export function ProjectTasksPage() {
                     return false;
                   }}
                 >
-                  <Button icon={<UploadOutlined />}>上传图片并插入 Markdown</Button>
+                  <Button icon={<UploadOutlined />} loading={instructionImageUploading}>
+                    上传图片并插入 Markdown
+                  </Button>
                 </Upload>
                 <Button
                   onClick={() => {

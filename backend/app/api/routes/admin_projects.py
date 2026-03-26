@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin_user
@@ -16,7 +16,14 @@ from app.crud.projects import (
 )
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.project import ProjectDetailRead, ProjectInstructionUpdate, ProjectList, ProjectRead
+from app.schemas.project import (
+    ProjectDetailRead,
+    ProjectInstructionAssetRead,
+    ProjectInstructionUpdate,
+    ProjectList,
+    ProjectRead,
+)
+from app.services.project_instruction_assets import save_project_instruction_image
 
 router = APIRouter(
     prefix="/admin/projects",
@@ -79,6 +86,27 @@ def update_admin_project(
         build_project_payload(updated_project, stats_map.get(updated_project.id), include_instruction=True)
     )
     return build_response(message="项目说明文档已更新", data=serialize_schema(data))
+
+
+@router.post("/{project_id}/instruction-assets")
+async def upload_admin_project_instruction_asset(
+    project_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    project = get_project_by_id(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    data = ProjectInstructionAssetRead.model_validate(
+        save_project_instruction_image(
+            project_id,
+            filename=request.headers.get("x-upload-filename"),
+            content_type=request.headers.get("content-type"),
+            content=await request.body(),
+        )
+    )
+    return build_response(message="说明文档图片上传成功", data=serialize_schema(data))
 
 
 @router.patch("/{project_id}/publish")

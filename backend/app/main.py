@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
 from app.api.routes.public import router as public_router
@@ -15,6 +16,7 @@ setup_logging(settings.app_debug)
 
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, debug=settings.app_debug)
+    settings.uploads_root.mkdir(parents=True, exist_ok=True)
 
     app.add_middleware(
         CORSMiddleware,
@@ -25,6 +27,7 @@ def create_app() -> FastAPI:
     )
 
     register_exception_handlers(app)
+    app.mount("/uploads", StaticFiles(directory=settings.uploads_root), name="uploads")
     app.include_router(public_router)
     app.include_router(api_router, prefix=settings.api_prefix)
 

@@ -20,6 +20,7 @@ import type {
   MyReviewTaskQueueListResult,
   PingInfo,
   ProjectDetailItem,
+  ProjectInstructionAssetItem,
   ProjectItem,
   ProjectListResult,
   ProjectTaskReviewItem,
@@ -195,6 +196,44 @@ async function requestDownload(path: string, init?: RequestInit): Promise<Downlo
   };
 }
 
+async function requestBinaryUpload<T>(path: string, file: File): Promise<T> {
+  let response: Response;
+  const session = readSession();
+  const headers = new Headers();
+  headers.set("Content-Type", file.type || "application/octet-stream");
+  headers.set("X-Upload-Filename", encodeURIComponent(file.name || "image"));
+  if (session?.access_token) {
+    headers.set("Authorization", `Bearer ${session.access_token}`);
+  }
+
+  try {
+    response = await fetch(path, {
+      method: "POST",
+      headers,
+      body: file,
+    });
+  } catch {
+    throw new Error("网络请求失败，请检查前后端服务是否已启动");
+  }
+
+  const payload = await parseResponsePayload<T>(response);
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearSession();
+      if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+        window.location.replace("/login");
+      }
+    }
+    throw new Error(resolveErrorMessage(payload, response));
+  }
+
+  if (!payload || typeof payload !== "object" || !("data" in payload)) {
+    throw new Error("服务返回格式不正确");
+  }
+
+  return payload.data as T;
+}
+
 export function fetchSystemInfo() {
   return request<SystemInfo>("/api/system/info");
 }
@@ -233,6 +272,10 @@ export function updateAdminProjectInstruction(projectId: number, instruction_mar
     method: "PATCH",
     body: JSON.stringify({ instruction_markdown }),
   });
+}
+
+export function uploadAdminProjectInstructionAsset(projectId: number, file: File) {
+  return requestBinaryUpload<ProjectInstructionAssetItem>(`/api/admin/projects/${projectId}/instruction-assets`, file);
 }
 
 export function publishAdminProject(projectId: number) {

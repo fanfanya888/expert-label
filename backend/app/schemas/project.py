@@ -63,3 +63,11 @@ class ProjectHallList(ListResult):
 
 class ProjectInstructionUpdate(BaseModel):
     instruction_markdown: str | None = None
+
+
+class ProjectInstructionAssetRead(BaseModel):
+    url: str
+    filename: str
+    content_type: str
+    size: int
+    original_filename: str = ""
