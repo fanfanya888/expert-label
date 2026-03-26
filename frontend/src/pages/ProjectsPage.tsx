@@ -1,4 +1,9 @@
-import { CheckCircleOutlined, ProfileOutlined, ReloadOutlined, StopOutlined } from "@ant-design/icons";
+import {
+  CheckCircleOutlined,
+  ProfileOutlined,
+  ReloadOutlined,
+  StopOutlined,
+} from "@ant-design/icons";
 import { Alert, Button, Card, Empty, Space, Table, Tag, Typography, message } from "antd";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -56,7 +61,8 @@ export function ProjectsPage() {
       }
       await loadProjects({ silent: true });
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : project.is_published ? "下线项目失败" : "发布项目失败";
+      const errorMessage =
+        error instanceof Error ? error.message : project.is_published ? "下线项目失败" : "发布项目失败";
       message.error(errorMessage);
     } finally {
       setPublishingId(null);

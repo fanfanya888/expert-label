@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin_user
+from app.core.task_workflow import TASK_STATUS_APPROVED
 from app.core.response import build_response, serialize_schema
 from app.crud.project_task_reviews import (
     approve_project_task,
@@ -242,6 +245,60 @@ def _build_review_task_detail(
     }
 
 
+def _sanitize_export_payload(data: Any) -> Any:
+    if isinstance(data, dict):
+        return {
+            key: _sanitize_export_payload(value)
+            for key, value in data.items()
+            if key not in {"latest_review", "review_annotations"}
+        }
+    if isinstance(data, list):
+        return [_sanitize_export_payload(item) for item in data]
+    return data
+
+
+def _build_approved_task_export_payload(
+    db: Session,
+    *,
+    project,
+    task,
+) -> dict[str, Any] | None:
+    plugin = get_plugin_registry().get(project.plugin_code or "")
+    if plugin is None:
+        return None
+
+    export_plugin = cast(Any, plugin)
+    submission_data: dict[str, Any] | None = None
+    if hasattr(export_plugin, "get_latest_task_submission_detail"):
+        detail = export_plugin.get_latest_task_submission_detail(
+            db,
+            project.id,
+            task.external_task_id,
+        )
+        if isinstance(detail, dict):
+            submission_data = detail
+
+    if submission_data is None and hasattr(export_plugin, "list_project_task_submissions"):
+        submissions = export_plugin.list_project_task_submissions(
+            db,
+            project_id=project.id,
+            task_id=task.external_task_id,
+            limit=1,
+        )
+        if isinstance(submissions, list) and submissions and isinstance(submissions[0], dict):
+            submission_data = submissions[0]
+
+    if submission_data is None:
+        return None
+
+    return {
+        "task_id": task.id,
+        "external_task_id": task.external_task_id,
+        "approved_at": task.approved_at.isoformat() if task.approved_at is not None else None,
+        "result": _sanitize_export_payload(submission_data),
+    }
+
+
 @router.get("")
 def list_admin_project_tasks(
     project_id: int,
@@ -264,6 +321,61 @@ def list_admin_project_tasks(
         for item in items
     ]
     return build_response(data=serialize_schema(data))
+
+
+@router.get("/export")
+def export_admin_project_tasks(
+    project_id: int,
+    format: Literal["json"] = Query(default="json"),
+    db: Session = Depends(get_db),
+) -> Response:
+    project = _get_project_or_404(db, project_id)
+    _, total = list_project_tasks(db, project_id, skip=0, limit=1)
+    tasks, _ = list_project_tasks(db, project_id, skip=0, limit=max(total, 1))
+    approved_tasks = [
+        item
+        for item in tasks
+        if item.task_status == TASK_STATUS_APPROVED
+    ]
+    approved_results = [
+        payload
+        for item in approved_tasks
+        if (
+            payload := _build_approved_task_export_payload(
+                db,
+                project=project,
+                task=item,
+            )
+        )
+        is not None
+    ]
+    exported_at = datetime.now(timezone.utc)
+    payload = {
+        "meta": {
+            "resource": "admin_project_approved_results",
+            "format": format,
+            "exported_at": exported_at.isoformat(),
+            "project_id": project.id,
+            "task_total": total,
+            "approved_task_total": len(approved_tasks),
+            "exported_result_total": len(approved_results),
+        },
+        "project": {
+            "id": project.id,
+            "name": project.name,
+            "plugin_code": project.plugin_code,
+        },
+        "approved_results": approved_results,
+    }
+    timestamp = exported_at.strftime("%Y%m%dT%H%M%SZ")
+    filename = f"project-{project.id}-approved-results-{timestamp}.json"
+    return Response(
+        content=json.dumps(payload, ensure_ascii=False, indent=2),
+        media_type="application/json; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
 
 
 @router.post("")

@@ -44,6 +44,11 @@ type ErrorEnvelope = {
   detail?: string;
 };
 
+type DownloadResult = {
+  blob: Blob;
+  filename: string | null;
+};
+
 async function parseResponsePayload<T>(response: Response): Promise<ApiEnvelope<T> | ErrorEnvelope | null> {
   const text = await response.text();
   if (!text) {
@@ -99,6 +104,24 @@ function ensureArray<T>(value: unknown): T[] {
   return [];
 }
 
+function resolveDownloadFilename(contentDisposition: string | null): string | null {
+  if (!contentDisposition) {
+    return null;
+  }
+
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      return utf8Match[1];
+    }
+  }
+
+  const asciiMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+  return asciiMatch?.[1] ?? null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   const session = readSession();
@@ -133,6 +156,40 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return payload.data as T;
+}
+
+async function requestDownload(path: string, init?: RequestInit): Promise<DownloadResult> {
+  let response: Response;
+  const session = readSession();
+  const headers = new Headers(init?.headers ?? {});
+  if (session?.access_token) {
+    headers.set("Authorization", `Bearer ${session.access_token}`);
+  }
+
+  try {
+    response = await fetch(path, {
+      ...init,
+      headers,
+    });
+  } catch {
+    throw new Error("网络请求失败，请检查前后端服务是否已启动");
+  }
+
+  if (!response.ok) {
+    const payload = await parseResponsePayload<null>(response);
+    if (response.status === 401) {
+      clearSession();
+      if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+        window.location.replace("/login");
+      }
+    }
+    throw new Error(resolveErrorMessage(payload, response));
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: resolveDownloadFilename(response.headers.get("Content-Disposition")),
+  };
 }
 
 export function fetchSystemInfo() {
@@ -183,6 +240,10 @@ export function unpublishAdminProject(projectId: number) {
 export async function fetchAdminProjectTasks(projectId: number) {
   const data = await request<unknown>(`/api/admin/projects/${projectId}/tasks`);
   return ensureArray<AdminProjectTaskItem>(data);
+}
+
+export function exportAdminProjectTasks(projectId: number, format: "json") {
+  return requestDownload(`/api/admin/projects/${projectId}/tasks/export?format=${encodeURIComponent(format)}`);
 }
 
 export function createAdminProjectTask(projectId: number, payload: AdminProjectTaskCreatePayload) {

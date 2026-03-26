@@ -1,6 +1,7 @@
 import {
   ArrowLeftOutlined,
   CheckCircleOutlined,
+  DownloadOutlined,
   PlusOutlined,
   ReloadOutlined,
   StopOutlined,
@@ -34,6 +35,7 @@ import {
   createAdminProjectTask,
   deleteAdminProjectTask,
   dispatchAdminProjectTaskReview,
+  exportAdminProjectTasks,
   fetchAdminProjectDetail,
   fetchAdminProjectTaskReviewDetail,
   fetchAdminProjectTaskReviews,
@@ -78,6 +80,8 @@ interface SearchCaseTaskFormValues {
   model_b_name: string;
 }
 
+type ExportFormat = "json";
+
 const DEFAULT_MRR_SCHEMA: ModelResponseReviewSchema = {
   plugin_code: "model_response_review",
   plugin_version: "1.0.0",
@@ -101,6 +105,17 @@ const DEFAULT_SEARCH_CASE_SCHEMA: SingleTurnSearchCaseSchema = {
 
 function formatDateTime(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : "-";
+}
+
+function triggerFileDownload(blob: Blob, filename: string) {
+  const downloadUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = downloadUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => window.URL.revokeObjectURL(downloadUrl), 0);
 }
 
 function getPublishMeta(status: string) {
@@ -195,6 +210,9 @@ export function ProjectTasksPage() {
   const [actionKey, setActionKey] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("json");
+  const [exporting, setExporting] = useState(false);
   const [reviewDrawerOpen, setReviewDrawerOpen] = useState(false);
   const [reviewDrawerTask, setReviewDrawerTask] = useState<AdminProjectTaskItem | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -233,6 +251,8 @@ export function ProjectTasksPage() {
     setSearchCaseSchema(null);
     setItems([]);
     setLoadError(null);
+    setExportModalOpen(false);
+    setExporting(false);
     setReviewDrawerTask(null);
     setReviewItems([]);
     setReviewDrawerOpen(false);
@@ -274,6 +294,22 @@ export function ProjectTasksPage() {
       if (!silent) message.error(errorMessage);
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const { blob, filename } = await exportAdminProjectTasks(projectIdNumber, exportFormat);
+      const fallbackName = `project-${projectIdNumber}-approved-results-${new Date().toISOString().replace(/[:.]/g, "-")}.${exportFormat}`;
+      triggerFileDownload(blob, filename ?? fallbackName);
+      setExportModalOpen(false);
+      message.success("最终通过数据导出成功");
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "导出最终通过数据失败，请稍后重试";
+      message.error(errorMessage);
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -587,6 +623,9 @@ export function ProjectTasksPage() {
         extra={
           <Space>
             <Button icon={<ReloadOutlined />} onClick={() => void loadPageData()} loading={loading}>刷新</Button>
+            <Button icon={<DownloadOutlined />} onClick={() => setExportModalOpen(true)} disabled={!project || loading}>
+              数据导出
+            </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal} disabled={!project || !isSupportedProject || loading}>{isSearchCase ? "新建模板" : "新建任务"}</Button>
           </Space>
         }
@@ -619,6 +658,28 @@ export function ProjectTasksPage() {
           columns={columns}
         />
       </Card>
+
+      <Modal
+        title="导出当前项目数据"
+        open={exportModalOpen}
+        onCancel={() => setExportModalOpen(false)}
+        onOk={() => void handleExport()}
+        okText="下载文件"
+        cancelText="取消"
+        confirmLoading={exporting}
+      >
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Typography.Text strong>导出格式</Typography.Text>
+          <Select
+            value={exportFormat}
+            options={[{ label: "JSON", value: "json" }]}
+            onChange={(value) => setExportFormat(value as ExportFormat)}
+          />
+          <Typography.Text type="secondary">
+            当前只导出该项目里最终审核通过的结果数据，不包含批注和历史审核记录。
+          </Typography.Text>
+        </Space>
+      </Modal>
 
       <Modal
         title={isSearchCase ? "新建模板" : "新建任务"}
