@@ -145,6 +145,7 @@ def claim_review_task(
     *,
     project_id: int,
     user_id: int,
+    prefer_existing: bool = True,
 ) -> ProjectTaskReview | None:
     existing_review = db.scalar(
         select(ProjectTaskReview)
@@ -163,7 +164,7 @@ def claim_review_task(
             ProjectTaskReview.id.desc(),
         )
     )
-    if existing_review is not None:
+    if prefer_existing and existing_review is not None:
         return existing_review
 
     current_owned_count = int(
@@ -212,6 +213,58 @@ def claim_review_task(
     db.commit()
     db.refresh(review)
     return review
+
+
+def list_user_review_tasks(
+    db: Session,
+    *,
+    user_id: int,
+) -> list[tuple[ProjectTaskReview, ProjectTask]]:
+    statement = (
+        select(ProjectTaskReview, ProjectTask)
+        .join(ProjectTask, ProjectTask.id == ProjectTaskReview.project_task_id)
+        .where(
+            ProjectTask.publish_status == "published",
+            ProjectTask.is_visible.is_(True),
+            ProjectTaskReview.reviewer_id == user_id,
+            ProjectTaskReview.review_status.in_(REVIEW_OWNED_STATUSES),
+        )
+        .order_by(
+            case(
+                (ProjectTaskReview.review_status == REVIEW_STATUS_IN_PROGRESS, 0),
+                else_=1,
+            ),
+            ProjectTaskReview.claimed_at.desc().nullslast(),
+            ProjectTaskReview.updated_at.desc(),
+            ProjectTaskReview.id.desc(),
+        )
+    )
+    return list(db.execute(statement).all())
+
+
+def get_user_review_task(
+    db: Session,
+    *,
+    project_id: int,
+    review_id: int,
+    user_id: int,
+    statuses: set[str] | None = None,
+) -> tuple[ProjectTaskReview, ProjectTask] | None:
+    filters = [
+        ProjectTask.project_id == project_id,
+        ProjectTask.publish_status == "published",
+        ProjectTask.is_visible.is_(True),
+        ProjectTaskReview.id == review_id,
+        ProjectTaskReview.reviewer_id == user_id,
+    ]
+    if statuses:
+        filters.append(ProjectTaskReview.review_status.in_(statuses))
+
+    return db.execute(
+        select(ProjectTaskReview, ProjectTask)
+        .join(ProjectTask, ProjectTask.id == ProjectTaskReview.project_task_id)
+        .where(*filters)
+    ).first()
 
 
 def submit_review_round(

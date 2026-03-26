@@ -16,6 +16,8 @@ import type {
   ModelResponseReviewSubmissionResult,
   ModelResponseReviewTaskItem,
   ModelResponseReviewValidationResult,
+  MyAnnotationTaskQueueListResult,
+  MyReviewTaskQueueListResult,
   PingInfo,
   ProjectItem,
   ProjectListResult,
@@ -307,6 +309,14 @@ export function fetchMyTaskHall() {
   return request<TaskHallListResult>("/api/me/projects/hall");
 }
 
+export function fetchMyAnnotationTasks() {
+  return request<MyAnnotationTaskQueueListResult>("/api/me/projects/annotation-tasks");
+}
+
+export function fetchMyReviewTasks() {
+  return request<MyReviewTaskQueueListResult>("/api/me/projects/review-tasks");
+}
+
 export function fetchMyReviewProjects() {
   return request<TaskHallListResult>("/api/me/projects/review/queue");
 }
@@ -334,6 +344,13 @@ export function releaseMyProjectAnnotationTask(projectId: number) {
   });
 }
 
+export function releaseMyProjectAnnotationTaskByTaskId(projectId: number, taskId: string) {
+  return request<null>(`/api/me/projects/${projectId}/annotation-task/${encodeURIComponent(taskId)}/release`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export async function claimMyProjectReviewTask(projectId: number) {
   const data = await request<ProjectTaskReviewTaskDetail | null>(`/api/me/projects/${projectId}/review-task/claim`, {
     method: "POST",
@@ -344,6 +361,11 @@ export async function claimMyProjectReviewTask(projectId: number) {
 
 export async function fetchMyProjectCurrentReviewTask(projectId: number) {
   const data = await request<ProjectTaskReviewTaskDetail | null>(`/api/me/projects/${projectId}/review-task/current`);
+  return data && typeof data === "object" ? data : null;
+}
+
+export async function fetchMyProjectReviewTask(projectId: number, reviewId: number) {
+  const data = await request<ProjectTaskReviewTaskDetail | null>(`/api/me/projects/${projectId}/review-task/${reviewId}`);
   return data && typeof data === "object" ? data : null;
 }
 
@@ -385,6 +407,13 @@ export async function fetchModelResponseReviewCurrentTask(projectId: number) {
   return data && typeof data === "object" ? data : null;
 }
 
+export async function fetchModelResponseReviewTask(projectId: number, taskId: string) {
+  const data = await request<ModelResponseReviewTaskItem | null>(
+    `/api/plugins/model_response_review/projects/${projectId}/tasks/${encodeURIComponent(taskId)}`,
+  );
+  return data && typeof data === "object" ? data : null;
+}
+
 export async function fetchModelResponseReviewMySubmissionDetail(projectId: number, taskId: string) {
   const data = await request<ModelResponseReviewSubmissionRecord | null>(
     `/api/plugins/model_response_review/projects/${projectId}/tasks/${encodeURIComponent(taskId)}/submission-detail`,
@@ -402,6 +431,13 @@ export async function fetchModelResponseReviewMySubmissionDetailById(projectId: 
 export async function fetchSingleTurnSearchCaseCurrentTask(projectId: number) {
   const data = await request<SingleTurnSearchCaseTaskItem | null>(
     `/api/plugins/single_turn_search_case/projects/${projectId}/current-task`,
+  );
+  return data && typeof data === "object" ? data : null;
+}
+
+export async function fetchSingleTurnSearchCaseTask(projectId: number, taskId: string) {
+  const data = await request<SingleTurnSearchCaseTaskItem | null>(
+    `/api/plugins/single_turn_search_case/projects/${projectId}/tasks/${encodeURIComponent(taskId)}`,
   );
   return data && typeof data === "object" ? data : null;
 }

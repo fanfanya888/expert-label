@@ -69,11 +69,10 @@ export function TaskHallPage() {
     if (!session?.user.can_review) {
       return;
     }
-    if (project.current_user_review_owned_count > 0) {
-      navigate("/user/review-tasks");
-      return;
-    }
     if (!project.can_claim_review) {
+      if (project.current_user_review_owned_count > 0) {
+        navigate("/user/review-tasks");
+      }
       return;
     }
 
@@ -126,7 +125,7 @@ export function TaskHallPage() {
               <Card className="panel-card">
                 <Space direction="vertical" size={14} style={{ width: "100%" }}>
                   <Space wrap>
-                    <Tag>{`领题进度 ${project.claim_progress_percent}%`}</Tag>
+                    <Tag>{`领取进度 ${project.claim_progress_percent}%`}</Tag>
                     {project.trial_passed ? <Tag color="blue">试标已通过</Tag> : <Tag color="gold">试标未通过</Tag>}
                   </Space>
 
@@ -140,7 +139,7 @@ export function TaskHallPage() {
                   </div>
 
                   <div>
-                    <Typography.Text type="secondary">领题进度</Typography.Text>
+                    <Typography.Text type="secondary">领取进度</Typography.Text>
                     <Progress percent={project.claim_progress_percent} size="small" style={{ marginTop: 8 }} />
                     <Space size={16} style={{ marginTop: 8 }} wrap>
                       <Typography.Text type="secondary">{`可领标注 ${project.annotation_available_count}`}</Typography.Text>
@@ -179,10 +178,10 @@ export function TaskHallPage() {
                         disabled={!project.can_claim_review && project.current_user_review_owned_count === 0}
                         onClick={() => void handleClaimReview(project)}
                       >
-                        {project.current_user_review_owned_count > 0
-                          ? "去质检任务"
-                          : project.can_claim_review
-                            ? "领取质检"
+                        {project.can_claim_review
+                          ? "领取质检"
+                          : project.current_user_review_owned_count > 0
+                            ? "去质检任务"
                             : "暂无可领质检"}
                       </Button>
                     ) : null}

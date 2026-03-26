@@ -24,6 +24,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   fetchModelResponseReviewRubric,
   fetchModelResponseReviewSchema,
+  fetchMyProjectReviewTask,
   fetchMyProjectCurrentReviewTask,
   fetchMyProjectDetail,
   submitMyProjectReviewTask,
@@ -417,8 +418,9 @@ function SearchCaseScoreSummarySection({
 
 export function ProjectReviewPage() {
   const navigate = useNavigate();
-  const { projectId } = useParams<{ projectId: string }>();
+  const { projectId, reviewId } = useParams<{ projectId: string; reviewId?: string }>();
   const projectIdNumber = Number(projectId);
+  const reviewIdNumber = reviewId ? Number(reviewId) : null;
   const [form] = Form.useForm<ReviewFormValues>();
   const [project, setProject] = useState<ProjectItem | null>(null);
   const [reviewTask, setReviewTask] = useState<ProjectTaskReviewTaskDetail | null>(null);
@@ -447,11 +449,18 @@ export function ProjectReviewPage() {
       return;
     }
 
+    if (reviewId && (reviewIdNumber === null || Number.isNaN(reviewIdNumber) || reviewIdNumber <= 0)) {
+      setLoadError("璐ㄦ浠诲姟鍙傛暟涓嶆纭?");
+      return;
+    }
+
     setLoading(true);
     try {
       const [projectDetail, currentTask] = await Promise.all([
         fetchMyProjectDetail(projectIdNumber),
-        fetchMyProjectCurrentReviewTask(projectIdNumber),
+        reviewIdNumber
+          ? fetchMyProjectReviewTask(projectIdNumber, reviewIdNumber)
+          : fetchMyProjectCurrentReviewTask(projectIdNumber),
       ]);
 
       let nextSchema = DEFAULT_MRR_SCHEMA;
@@ -496,7 +505,7 @@ export function ProjectReviewPage() {
 
   useEffect(() => {
     void loadPageData({ silent: true });
-  }, [projectIdNumber]);
+  }, [projectIdNumber, reviewIdNumber, reviewId]);
 
   const handleSubmit = async (values: ReviewFormValues) => {
     if (!reviewTask) {

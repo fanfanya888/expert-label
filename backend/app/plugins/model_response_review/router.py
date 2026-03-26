@@ -59,6 +59,18 @@ def get_project_current_task(
     return build_response(data=data)
 
 
+@router.get("/projects/{project_id}/tasks/{task_id}")
+def get_project_task(
+    project_id: int,
+    task_id: str,
+    current_user: User = Depends(require_annotator_user),
+    db: Session = Depends(get_db),
+    plugin: ModelResponseReviewPlugin = Depends(get_model_response_review_plugin),
+) -> dict[str, object]:
+    data = plugin.get_project_task(db, project_id, task_id, current_user.id)
+    return build_response(data=data)
+
+
 @router.get("/projects/{project_id}/tasks/{task_id}/submission-detail")
 def get_project_task_submission_detail(
     project_id: int,

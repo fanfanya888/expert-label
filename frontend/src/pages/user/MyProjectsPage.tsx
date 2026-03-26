@@ -1,75 +1,102 @@
 import { ArrowRightOutlined, ClockCircleOutlined, EyeOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Col, Empty, Row, Space, Typography, message } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Card, Col, Empty, Row, Space, Tag, Typography, message } from "antd";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { fetchMyTaskHall } from "../../services/api";
-import type { TaskHallProjectItem } from "../../types/api";
+import { fetchMyAnnotationTasks } from "../../services/api";
+import type { MyAnnotationTaskQueueItem } from "../../types/api";
 import { readSession } from "../../utils/session";
 
-function resolveProjectEntryPath(project: TaskHallProjectItem): string | null {
-  if (!project.entry_path) {
+function resolveProjectEntryPath(item: MyAnnotationTaskQueueItem): string | null {
+  if (!item.project.entry_path) {
     return null;
   }
-  return project.entry_path.replace("{project_id}", String(project.id));
+  return item.project.entry_path.replace("{project_id}", String(item.project.id));
 }
 
-function resolvePluginRoute(project: TaskHallProjectItem): string | null {
-  if (project.plugin_code === "model_response_review") {
-    return `/user/projects/${project.id}/model-response-review`;
+function resolveTaskRoute(item: MyAnnotationTaskQueueItem): string | null {
+  if (item.project.plugin_code === "model_response_review") {
+    return `/user/projects/${item.project.id}/model-response-review/tasks/${encodeURIComponent(item.task.external_task_id)}`;
   }
-  if (project.plugin_code === "single_turn_search_case") {
-    return `/user/projects/${project.id}/single-turn-search-case`;
+  if (item.project.plugin_code === "single_turn_search_case") {
+    return `/user/projects/${item.project.id}/single-turn-search-case/tasks/${encodeURIComponent(item.task.external_task_id)}`;
   }
-  return resolveProjectEntryPath(project);
+  return resolveProjectEntryPath(item);
 }
 
-function resolveReadonlyDetailRoute(project: TaskHallProjectItem): string | null {
-  if (!project.current_user_task_id) {
-    return null;
+function resolveReadonlyDetailRoute(item: MyAnnotationTaskQueueItem): string | null {
+  if (item.project.plugin_code === "model_response_review") {
+    return `/user/projects/${item.project.id}/model-response-review/submissions/${encodeURIComponent(item.task.external_task_id)}`;
   }
-  if (project.plugin_code === "model_response_review") {
-    return `/user/projects/${project.id}/model-response-review/submissions/${encodeURIComponent(project.current_user_task_id)}`;
-  }
-  if (project.plugin_code === "single_turn_search_case") {
-    return `/user/projects/${project.id}/single-turn-search-case/submissions/${encodeURIComponent(project.current_user_task_id)}`;
+  if (item.project.plugin_code === "single_turn_search_case") {
+    return `/user/projects/${item.project.id}/single-turn-search-case/submissions/${encodeURIComponent(item.task.external_task_id)}`;
   }
   return null;
 }
 
-function isAwaitingReview(project: TaskHallProjectItem): boolean {
-  return Boolean(project.current_user_task_status && project.current_user_task_status !== "annotation_in_progress");
+function isAwaitingReview(item: MyAnnotationTaskQueueItem): boolean {
+  return item.task.task_status !== "annotation_in_progress";
 }
 
-function getStatusText(project: TaskHallProjectItem): string {
-  if (isAwaitingReview(project)) {
-    return "当前已有试标进入审核流程，可以查看详情了解最新状态。";
+function isReturnedForRework(item: MyAnnotationTaskQueueItem): boolean {
+  return item.task.task_status === "annotation_in_progress" && item.task.latest_review_status === "waiting_resubmission";
+}
+
+function getTaskStatusTag(item: MyAnnotationTaskQueueItem) {
+  if (isReturnedForRework(item)) {
+    return <Tag color="volcano">已打回，请返修</Tag>;
   }
-  if (project.current_user_annotation_owned_count > 0) {
-    return project.trial_passed ? "当前有可继续处理的任务。" : "当前有可继续处理的试标题目。";
+  if (item.task.task_status === "annotation_in_progress") {
+    return <Tag color="blue">进行中</Tag>;
   }
-  if (project.trial_passed) {
-    return "试标已通过，可继续领取更多题目。";
+  if (item.task.task_status === "pending_review_dispatch") {
+    return <Tag color="gold">待分发质检</Tag>;
   }
-  return "试标未通过前，该项目最多只能持有 1 题。";
+  if (item.task.task_status === "review_pending") {
+    return <Tag color="orange">待质检领取</Tag>;
+  }
+  if (item.task.task_status === "review_in_progress") {
+    return <Tag color="purple">质检中</Tag>;
+  }
+  if (item.task.task_status === "review_submitted") {
+    return <Tag color="cyan">待管理员处理</Tag>;
+  }
+  return <Tag>{item.task.task_status}</Tag>;
+}
+
+function getStatusText(item: MyAnnotationTaskQueueItem): string {
+  if (isReturnedForRework(item)) {
+    return "该任务已被质检打回，请根据批注返修后重新提交。";
+  }
+  if (item.task.task_status === "annotation_in_progress") {
+    return item.trial_passed ? "当前任务可继续编辑并提交。" : "当前试标任务可继续编辑并提交。";
+  }
+  if (item.task.task_status === "pending_review_dispatch") {
+    return "标注已提交，系统正在准备进入质检流程。";
+  }
+  if (item.task.task_status === "review_pending") {
+    return "标注已提交，正在等待质检员领取。";
+  }
+  if (item.task.task_status === "review_in_progress") {
+    return "标注已提交，质检员正在审核。";
+  }
+  if (item.task.task_status === "review_submitted") {
+    return "质检已完成，正在等待管理员最终处理。";
+  }
+  return "当前任务状态已更新，请刷新后查看最新结果。";
 }
 
 export function MyProjectsPage() {
   const navigate = useNavigate();
   const session = readSession();
-  const [items, setItems] = useState<TaskHallProjectItem[]>([]);
+  const [items, setItems] = useState<MyAnnotationTaskQueueItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const ownedItems = useMemo(
-    () => items.filter((item) => item.current_user_annotation_owned_count > 0),
-    [items],
-  );
-
-  const loadProjects = async ({ silent = false }: { silent?: boolean } = {}) => {
+  const loadTasks = async ({ silent = false }: { silent?: boolean } = {}) => {
     setLoading(true);
     try {
-      const result = await fetchMyTaskHall();
+      const result = await fetchMyAnnotationTasks();
       setItems(result.items);
       setLoadError(null);
     } catch (error) {
@@ -87,22 +114,22 @@ export function MyProjectsPage() {
     if (!session?.user.can_annotate) {
       return;
     }
-    void loadProjects({ silent: true });
+    void loadTasks({ silent: true });
   }, [session?.user.can_annotate]);
 
-  const enterAnnotation = (project: TaskHallProjectItem) => {
-    if (project.external_url) {
-      window.open(project.external_url, "_blank", "noopener,noreferrer");
+  const enterAnnotation = (item: MyAnnotationTaskQueueItem) => {
+    if (item.project.external_url) {
+      window.open(item.project.external_url, "_blank", "noopener,noreferrer");
       return;
     }
 
-    const entryPath = resolvePluginRoute(project);
+    const entryPath = resolveTaskRoute(item);
     if (entryPath) {
       navigate(entryPath);
       return;
     }
 
-    navigate(`/user/projects/${project.id}/workspace`);
+    navigate(`/user/projects/${item.project.id}/workspace`);
   };
 
   return (
@@ -110,7 +137,7 @@ export function MyProjectsPage() {
       <Card
         className="panel-card"
         extra={
-          <Button icon={<ReloadOutlined />} onClick={() => void loadProjects()} loading={loading}>
+          <Button icon={<ReloadOutlined />} onClick={() => void loadTasks()} loading={loading}>
             刷新
           </Button>
         }
@@ -119,7 +146,7 @@ export function MyProjectsPage() {
           标注任务
         </Typography.Title>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          这里只显示你已经领取的标注项目。领取新题请先到任务大厅，领取成功后再回到这里开始处理或查看审核状态。
+          这里按你实际领取的每一条任务单独展示。同一项目领取多条任务后，不再合并成一个入口。
         </Typography.Paragraph>
       </Card>
 
@@ -131,7 +158,7 @@ export function MyProjectsPage() {
         </Card>
       ) : null}
 
-      {!session?.user.can_annotate ? null : ownedItems.length === 0 ? (
+      {!session?.user.can_annotate ? null : items.length === 0 ? (
         <Card className="panel-card">
           <Empty description="你还没有领取任何标注任务" image={Empty.PRESENTED_IMAGE_SIMPLE}>
             <Button type="primary" onClick={() => navigate("/user/task-hall")}>
@@ -141,45 +168,51 @@ export function MyProjectsPage() {
         </Card>
       ) : (
         <Row gutter={[20, 20]}>
-          {ownedItems.map((project) => {
-            const waitingForReview = isAwaitingReview(project);
-            const detailPath = waitingForReview ? resolveReadonlyDetailRoute(project) : null;
+          {items.map((item) => {
+            const waitingForReview = isAwaitingReview(item);
+            const detailPath = waitingForReview ? resolveReadonlyDetailRoute(item) : null;
 
             return (
-              <Col xs={24} md={12} xl={8} key={project.id}>
+              <Col xs={24} md={12} xl={8} key={`${item.project.id}-${item.task.external_task_id}`}>
                 <Card className="panel-card" style={{ height: "100%" }} bodyStyle={{ height: "100%" }}>
                   <Space direction="vertical" size={14} style={{ width: "100%", height: "100%" }}>
                     <div>
-                      <Typography.Title level={5} style={{ margin: 0 }}>
-                        {project.name}
-                      </Typography.Title>
+                      <Space wrap size={[8, 8]}>
+                        <Typography.Title level={5} style={{ margin: 0 }}>
+                          {item.project.name}
+                        </Typography.Title>
+                        {getTaskStatusTag(item)}
+                      </Space>
+                      <Typography.Text type="secondary" style={{ display: "block", marginTop: 8 }}>
+                        {`任务标识：${item.task.external_task_id}`}
+                      </Typography.Text>
                       <Typography.Paragraph type="secondary" style={{ minHeight: 66, margin: "8px 0 0" }}>
-                        {project.description || "暂无项目说明"}
+                        {item.project.description || "暂无项目说明"}
                       </Typography.Paragraph>
                     </div>
 
-                    <div style={{ minHeight: 64 }}>
+                    <div style={{ minHeight: 72 }}>
                       <Typography.Text type="secondary" style={{ display: "block" }}>
-                        {`已领取题数：${project.current_user_annotation_owned_count}/${project.current_user_annotation_limit}`}
+                        {`当前项目已领取：${item.current_user_annotation_owned_count}/${item.current_user_annotation_limit}`}
                       </Typography.Text>
                       <Typography.Text type="secondary" style={{ display: "block", marginTop: 8 }}>
-                        {getStatusText(project)}
+                        {getStatusText(item)}
                       </Typography.Text>
                     </div>
 
                     <Space wrap style={{ minHeight: 32, marginTop: "auto" }}>
                       {waitingForReview ? (
                         <Button icon={<ClockCircleOutlined />} disabled>
-                          待审核
+                          审核处理中
                         </Button>
                       ) : (
-                        <Button type="primary" icon={<ArrowRightOutlined />} onClick={() => enterAnnotation(project)}>
-                          {project.trial_passed ? "开始任务" : "开始试标"}
+                        <Button type="primary" icon={<ArrowRightOutlined />} onClick={() => enterAnnotation(item)}>
+                          {isReturnedForRework(item) ? "进入返修" : item.trial_passed ? "进入任务" : "进入试标"}
                         </Button>
                       )}
                       {detailPath ? (
                         <Button icon={<EyeOutlined />} onClick={() => navigate(detailPath)}>
-                          查看详情
+                          查看结果
                         </Button>
                       ) : null}
                     </Space>

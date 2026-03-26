@@ -143,6 +143,25 @@ class SingleTurnSearchCaseService:
             return None
         return self._build_task_read(task)
 
+    def get_task(
+        self,
+        db: Session,
+        project_id: int,
+        task_id: str,
+        user_id: int,
+    ) -> SingleTurnSearchCaseTaskRead | None:
+        self.get_project_or_raise(db, project_id)
+        task = self._get_task(db, project_id, task_id)
+        if task is None:
+            return None
+        if task.publish_status != "published" or not task.is_visible:
+            return None
+        if task.annotation_assignee_id != user_id:
+            return None
+        if task.task_status != TASK_STATUS_ANNOTATION_IN_PROGRESS:
+            return None
+        return self._build_task_read(task)
+
     def review_rule_with_ai(
         self,
         db: Session,

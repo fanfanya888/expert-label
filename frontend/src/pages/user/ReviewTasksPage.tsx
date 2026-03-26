@@ -1,37 +1,44 @@
 import { ArrowRightOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Col, Empty, Row, Space, Typography, message } from "antd";
+import { Alert, Button, Card, Col, Empty, Row, Space, Tag, Typography, message } from "antd";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { fetchMyReviewProjects } from "../../services/api";
-import type { TaskHallProjectItem } from "../../types/api";
+import { fetchMyReviewTasks } from "../../services/api";
+import type { MyReviewTaskQueueItem } from "../../types/api";
 import { readSession } from "../../utils/session";
 
-function isWaitingForResubmission(project: TaskHallProjectItem): boolean {
-  return project.current_user_review_task_status === "annotation_in_progress";
+function isWaitingForResubmission(item: MyReviewTaskQueueItem): boolean {
+  return item.review.review_status === "waiting_resubmission";
 }
 
-function getReviewStatusText(project: TaskHallProjectItem): string {
-  if (isWaitingForResubmission(project)) {
-    return "该项目已被你打回，正在等待标注员重新提交。";
+function getReviewStatusTag(item: MyReviewTaskQueueItem) {
+  if (item.review.review_status === "in_progress") {
+    return <Tag color="blue">质检中</Tag>;
   }
-  if (project.current_user_review_task_status === "review_in_progress") {
-    return "当前有可继续处理的质检任务。";
+  if (item.review.review_status === "waiting_resubmission") {
+    return <Tag color="gold">等待标注重提</Tag>;
   }
-  return "当前项目已有你已领取的质检任务。";
+  return <Tag>{item.review.review_status}</Tag>;
+}
+
+function getReviewStatusText(item: MyReviewTaskQueueItem): string {
+  if (isWaitingForResubmission(item)) {
+    return "这条质检单已被你打回，正在等待标注员重新提交。";
+  }
+  return "当前可继续处理这条质检任务。";
 }
 
 export function ReviewTasksPage() {
   const navigate = useNavigate();
   const session = readSession();
-  const [items, setItems] = useState<TaskHallProjectItem[]>([]);
+  const [items, setItems] = useState<MyReviewTaskQueueItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const loadProjects = async ({ silent = false }: { silent?: boolean } = {}) => {
+  const loadTasks = async ({ silent = false }: { silent?: boolean } = {}) => {
     setLoading(true);
     try {
-      const result = await fetchMyReviewProjects();
+      const result = await fetchMyReviewTasks();
       setItems(result.items);
       setLoadError(null);
     } catch (error) {
@@ -49,7 +56,7 @@ export function ReviewTasksPage() {
     if (!session?.user.can_review) {
       return;
     }
-    void loadProjects({ silent: true });
+    void loadTasks({ silent: true });
   }, [session?.user.can_review]);
 
   return (
@@ -57,7 +64,7 @@ export function ReviewTasksPage() {
       <Card
         className="panel-card"
         extra={
-          <Button icon={<ReloadOutlined />} onClick={() => void loadProjects()} loading={loading}>
+          <Button icon={<ReloadOutlined />} onClick={() => void loadTasks()} loading={loading}>
             刷新
           </Button>
         }
@@ -66,7 +73,7 @@ export function ReviewTasksPage() {
           质检任务
         </Typography.Title>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          这里只显示你已领取的质检项目。新的质检题目仍从任务大厅领取；如果你已经打回过某个任务，它会继续保留在这里，等标注员重提后再继续质检。
+          这里按你领取的每一条质检单独展示。打回后的等待重提单会继续保留，但不会和其他质检入口合并。
         </Typography.Paragraph>
       </Card>
 
@@ -88,27 +95,40 @@ export function ReviewTasksPage() {
         </Card>
       ) : (
         <Row gutter={[20, 20]}>
-          {items.map((project) => {
-            const waitingForResubmission = isWaitingForResubmission(project);
+          {items.map((item) => {
+            const waitingForResubmission = isWaitingForResubmission(item);
+
             return (
-              <Col xs={24} md={12} xl={8} key={project.id}>
+              <Col xs={24} md={12} xl={8} key={item.review.id}>
                 <Card className="panel-card" style={{ height: "100%" }} bodyStyle={{ height: "100%" }}>
                   <Space direction="vertical" size={14} style={{ width: "100%", height: "100%" }}>
                     <div>
-                      <Typography.Title level={5} style={{ margin: 0 }}>
-                        {project.name}
-                      </Typography.Title>
+                      <Space wrap size={[8, 8]}>
+                        <Typography.Title level={5} style={{ margin: 0 }}>
+                          {item.project.name}
+                        </Typography.Title>
+                        {getReviewStatusTag(item)}
+                      </Space>
+                      <Typography.Text type="secondary" style={{ display: "block", marginTop: 8 }}>
+                        {`任务标识：${item.task.external_task_id}`}
+                      </Typography.Text>
+                      <Typography.Text type="secondary" style={{ display: "block", marginTop: 4 }}>
+                        {`质检轮次：第 ${item.review.review_round} 轮`}
+                      </Typography.Text>
                       <Typography.Paragraph type="secondary" style={{ minHeight: 66, margin: "8px 0 0" }}>
-                        {project.description || "暂无项目说明"}
+                        {item.project.description || "暂无项目说明"}
                       </Typography.Paragraph>
                     </div>
 
-                    <div style={{ minHeight: 64 }}>
+                    <div style={{ minHeight: 72 }}>
                       <Typography.Text type="secondary" style={{ display: "block" }}>
-                        {`已领取质检数：${project.current_user_total_review_owned_count}/${project.current_user_review_limit}`}
+                        {`我的质检持有：${item.current_user_total_review_owned_count}/${item.current_user_review_limit}`}
+                      </Typography.Text>
+                      <Typography.Text type="secondary" style={{ display: "block", marginTop: 4 }}>
+                        {`当前项目已领取：${item.current_user_review_owned_count}`}
                       </Typography.Text>
                       <Typography.Text type="secondary" style={{ display: "block", marginTop: 8 }}>
-                        {getReviewStatusText(project)}
+                        {getReviewStatusText(item)}
                       </Typography.Text>
                     </div>
 
@@ -117,9 +137,9 @@ export function ReviewTasksPage() {
                         type="primary"
                         icon={<ArrowRightOutlined />}
                         disabled={waitingForResubmission}
-                        onClick={() => navigate(`/user/projects/${project.id}/review`)}
+                        onClick={() => navigate(`/user/projects/${item.project.id}/review/${item.review.id}`)}
                       >
-                        {waitingForResubmission ? "等待重提" : "开始质检"}
+                        {waitingForResubmission ? "等待重提" : "进入质检"}
                       </Button>
                     </Space>
                   </Space>

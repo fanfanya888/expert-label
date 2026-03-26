@@ -398,6 +398,70 @@ def get_project_task_hall_stats_map(
     return stats_map
 
 
+def list_user_annotation_tasks(
+    db: Session,
+    *,
+    user_id: int,
+) -> list[ProjectTask]:
+    statement = (
+        select(ProjectTask)
+        .where(
+            ProjectTask.publish_status == "published",
+            ProjectTask.is_visible.is_(True),
+            ProjectTask.annotation_assignee_id == user_id,
+            ProjectTask.task_status.in_(ANNOTATION_OWNED_STATUSES),
+        )
+        .order_by(
+            case(
+                (ProjectTask.task_status == TASK_STATUS_ANNOTATION_IN_PROGRESS, 0),
+                else_=1,
+            ),
+            ProjectTask.annotation_claimed_at.desc().nullslast(),
+            ProjectTask.updated_at.desc(),
+            ProjectTask.id.desc(),
+        )
+    )
+    return list(db.scalars(statement).all())
+
+
+def release_annotation_task_by_external_id(
+    db: Session,
+    *,
+    project_id: int,
+    plugin_code: str,
+    user_id: int,
+    external_task_id: str,
+) -> ProjectTask | None:
+    task = db.scalar(
+        select(ProjectTask)
+        .where(
+            ProjectTask.project_id == project_id,
+            ProjectTask.plugin_code == plugin_code,
+            ProjectTask.annotation_assignee_id == user_id,
+            ProjectTask.external_task_id == external_task_id,
+            ProjectTask.task_status == TASK_STATUS_ANNOTATION_IN_PROGRESS,
+        )
+        .with_for_update(skip_locked=True)
+    )
+    if task is None:
+        return None
+
+    task.annotation_assignee_id = None
+    task.annotation_claimed_at = None
+    task.annotation_submitted_at = None
+    task.task_status = TASK_STATUS_ANNOTATION_PENDING
+    db.execute(
+        delete(ProjectTaskReview).where(
+            ProjectTaskReview.project_task_id == task.id,
+            ProjectTaskReview.review_status == REVIEW_STATUS_WAITING_RESUBMISSION,
+        )
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
 def get_project_task_review_stats_map(
     db: Session,
     task_ids: list[int],

@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.schemas.common import ListResult, ORMModel
+from app.schemas.project import ProjectRead
 
 
 class ProjectTaskCreate(BaseModel):
@@ -73,3 +74,28 @@ class ProjectTaskReviewTaskDetail(BaseModel):
     task: ProjectTaskRead
     submission: dict[str, Any] | None
     review_history: list[ProjectTaskReviewRead] = Field(default_factory=list)
+
+
+class MyAnnotationTaskQueueItem(BaseModel):
+    project: ProjectRead
+    task: ProjectTaskRead
+    current_user_annotation_limit: int = 1
+    current_user_annotation_owned_count: int = 0
+    trial_passed: bool = False
+
+
+class MyAnnotationTaskQueueList(ListResult):
+    items: list[MyAnnotationTaskQueueItem]
+
+
+class MyReviewTaskQueueItem(BaseModel):
+    project: ProjectRead
+    task: ProjectTaskRead
+    review: ProjectTaskReviewRead
+    current_user_review_limit: int = 3
+    current_user_total_review_owned_count: int = 0
+    current_user_review_owned_count: int = 0
+
+
+class MyReviewTaskQueueList(ListResult):
+    items: list[MyReviewTaskQueueItem]

@@ -51,6 +51,18 @@ def get_project_current_task(
     return build_response(data=data)
 
 
+@router.get("/projects/{project_id}/tasks/{task_id}")
+def get_project_task(
+    project_id: int,
+    task_id: str,
+    current_user: User = Depends(require_annotator_user),
+    db: Session = Depends(get_db),
+    plugin: SingleTurnSearchCasePlugin = Depends(get_single_turn_search_case_plugin),
+) -> dict[str, object]:
+    data = plugin.get_project_task(db, project_id, task_id, current_user.id)
+    return build_response(data=data)
+
+
 @router.get("/projects/{project_id}/tasks/{task_id}/submission-detail")
 def get_project_task_submission_detail(
     project_id: int,
@@ -185,4 +197,3 @@ def create_submission(
         raise HTTPException(status_code=422, detail="提交数据校验失败")
     data = plugin.save_project_submission(db, project_id, validated_payload)
     return build_response(message="Case 已提交", data=data)
-

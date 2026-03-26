@@ -7,11 +7,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_annotator_user, require_end_user, require_reviewer_user
-from app.core.task_workflow import REVIEW_OWNED_STATUSES
+from app.core.task_workflow import REVIEW_OWNED_STATUSES, REVIEW_STATUS_IN_PROGRESS
 from app.core.response import build_response, serialize_schema
 from app.crud.project_task_reviews import (
     build_project_task_review_payload,
     claim_review_task,
+    get_user_review_task,
+    list_user_review_tasks,
     list_task_reviews,
     submit_review_round,
 )
@@ -20,6 +22,8 @@ from app.crud.project_tasks import (
     claim_annotation_task,
     get_project_task_hall_stats_map,
     get_project_task_review_stats_map,
+    list_user_annotation_tasks,
+    release_annotation_task_by_external_id,
     release_annotation_task,
 )
 from app.crud.projects import (
@@ -38,7 +42,16 @@ from app.models.single_turn_search_case_record import SingleTurnSearchCaseRecord
 from app.models.user import User
 from app.plugins.registrar import get_plugin_registry
 from app.schemas.project import ProjectHallList, ProjectHallRead, ProjectList, ProjectRead
-from app.schemas.project_task import ProjectTaskRead, ProjectTaskReviewRead, ProjectTaskReviewSubmit, ProjectTaskReviewTaskDetail
+from app.schemas.project_task import (
+    MyAnnotationTaskQueueItem,
+    MyAnnotationTaskQueueList,
+    MyReviewTaskQueueItem,
+    MyReviewTaskQueueList,
+    ProjectTaskRead,
+    ProjectTaskReviewRead,
+    ProjectTaskReviewSubmit,
+    ProjectTaskReviewTaskDetail,
+)
 from app.schemas.submission_record import UserSubmissionRecordList, UserSubmissionRecordRead
 
 router = APIRouter(
@@ -168,6 +181,14 @@ def _build_project_hall_read(
             "can_claim_review": bool(stats.get("can_claim_review", False)) and current_user.can_review,
         }
     )
+
+
+def _build_project_read(
+    project: Project,
+    *,
+    project_stats: dict[str, int] | None,
+) -> ProjectRead:
+    return ProjectRead.model_validate(build_project_payload(project, project_stats))
 
 
 def _build_review_task_detail(
@@ -465,6 +486,45 @@ def list_my_project_hall(
     return build_response(data=serialize_schema(data))
 
 
+@router.get("/annotation-tasks")
+def list_my_annotation_tasks(
+    current_user: User = Depends(require_annotator_user),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    tasks = list_user_annotation_tasks(db, user_id=current_user.id)
+    project_ids = list(dict.fromkeys(task.project_id for task in tasks))
+    projects = (
+        list(db.scalars(select(Project).where(Project.id.in_(project_ids))).all())
+        if project_ids
+        else []
+    )
+    project_map = {item.id: item for item in projects}
+    stats_map = get_project_task_stats_map(db, project_ids, visible_only=True)
+    hall_stats_map = get_project_task_hall_stats_map(db, project_ids, user_id=current_user.id)
+    review_stats_map = get_project_task_review_stats_map(db, [item.id for item in tasks])
+
+    items: list[MyAnnotationTaskQueueItem] = []
+    for task in tasks:
+        project = project_map.get(task.project_id)
+        if project is None:
+            continue
+        hall_stats = hall_stats_map.get(project.id, {})
+        items.append(
+            MyAnnotationTaskQueueItem(
+                project=_build_project_read(project, project_stats=stats_map.get(project.id)),
+                task=_build_task_read(db, task, review_stats=review_stats_map.get(task.id)),
+                current_user_annotation_limit=int(hall_stats.get("current_user_annotation_limit", 1)),
+                current_user_annotation_owned_count=int(
+                    hall_stats.get("current_user_annotation_owned_count", 0)
+                ),
+                trial_passed=bool(hall_stats.get("trial_passed", False)),
+            )
+        )
+
+    data = MyAnnotationTaskQueueList(total=len(items), items=items)
+    return build_response(data=serialize_schema(data))
+
+
 @router.get("/review/queue")
 def list_my_review_projects(
     current_user: User = Depends(require_reviewer_user),
@@ -486,6 +546,61 @@ def list_my_review_projects(
             for item in items
         ],
     )
+    return build_response(data=serialize_schema(data))
+
+
+@router.get("/review-tasks")
+def list_my_review_tasks(
+    current_user: User = Depends(require_reviewer_user),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    review_rows = list_user_review_tasks(db, user_id=current_user.id)
+    project_ids = list(dict.fromkeys(task.project_id for _, task in review_rows))
+    projects = (
+        list(db.scalars(select(Project).where(Project.id.in_(project_ids))).all())
+        if project_ids
+        else []
+    )
+    project_map = {item.id: item for item in projects}
+    stats_map = get_project_task_stats_map(db, project_ids, visible_only=True)
+    hall_stats_map = get_project_task_hall_stats_map(db, project_ids, user_id=current_user.id)
+    review_stats_map = get_project_task_review_stats_map(db, [task.id for _, task in review_rows])
+    username_map = get_usernames_map(
+        db,
+        [review.reviewer_id for review, _ in review_rows if review.reviewer_id is not None],
+    )
+
+    items: list[MyReviewTaskQueueItem] = []
+    for review, task in review_rows:
+        project = project_map.get(task.project_id)
+        if project is None:
+            continue
+        hall_stats = hall_stats_map.get(project.id, {})
+        items.append(
+            MyReviewTaskQueueItem(
+                project=_build_project_read(project, project_stats=stats_map.get(project.id)),
+                task=_build_task_read(db, task, review_stats=review_stats_map.get(task.id)),
+                review=ProjectTaskReviewRead.model_validate(
+                    build_project_task_review_payload(
+                        review,
+                        reviewer_username=(
+                            username_map.get(review.reviewer_id)
+                            if review.reviewer_id is not None
+                            else None
+                        ),
+                    )
+                ),
+                current_user_review_limit=int(hall_stats.get("current_user_review_limit", 3)),
+                current_user_total_review_owned_count=int(
+                    hall_stats.get("current_user_total_review_owned_count", 0)
+                ),
+                current_user_review_owned_count=int(
+                    hall_stats.get("current_user_review_owned_count", 0)
+                ),
+            )
+        )
+
+    data = MyReviewTaskQueueList(total=len(items), items=items)
     return build_response(data=serialize_schema(data))
 
 
@@ -556,6 +671,32 @@ def release_my_annotation_task(
     return build_response(message="宸叉斁寮冨綋鍓嶈瘯鏍囦换鍔?", data=None)
 
 
+@router.post("/{project_id:int}/annotation-task/{task_id}/release")
+def release_my_annotation_task_by_task_id(
+    project_id: int,
+    task_id: str,
+    current_user: User = Depends(require_annotator_user),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    project = get_project_by_id(db, project_id)
+    if project is None or not project.is_published or not project.is_visible:
+        raise HTTPException(status_code=404, detail="妞ゅ湱娲版稉宥呯摠閸?")
+    if not project.plugin_code:
+        raise HTTPException(status_code=422, detail="妞ゅ湱娲伴張顏嗙拨鐎规碍褰冩禒?")
+
+    task = release_annotation_task_by_external_id(
+        db,
+        project_id=project_id,
+        plugin_code=project.plugin_code,
+        user_id=current_user.id,
+        external_task_id=task_id,
+    )
+    if task is None:
+        raise HTTPException(status_code=422, detail="瑜版挸澧犲▽鈩冩箒閸欘垱鏂佸鍐畱鐠囨洘鐖ｆ禒璇插")
+
+    return build_response(message="瀹稿弶鏂佸鍐ㄧ秼閸撳秷鐦弽鍥︽崲閸?", data=None)
+
+
 @router.post("/{project_id:int}/review-task/claim")
 def claim_my_review_task(
     project_id: int,
@@ -567,7 +708,12 @@ def claim_my_review_task(
         raise HTTPException(status_code=404, detail="项目不存在")
 
     try:
-        review = claim_review_task(db, project_id=project_id, user_id=current_user.id)
+        review = claim_review_task(
+            db,
+            project_id=project_id,
+            user_id=current_user.id,
+            prefer_existing=False,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if review is None:
@@ -600,6 +746,32 @@ def get_my_current_review_task(
         return build_response(data=None)
 
     review, task = current_review
+    data = _build_review_task_detail(db, project_id, review, task)
+    return build_response(data=serialize_schema(data))
+
+
+@router.get("/{project_id:int}/review-task/{review_id:int}")
+def get_my_review_task(
+    project_id: int,
+    review_id: int,
+    current_user: User = Depends(require_reviewer_user),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    project = get_project_by_id(db, project_id)
+    if project is None or not project.is_published or not project.is_visible:
+        raise HTTPException(status_code=404, detail="椤圭洰涓嶅瓨鍦?")
+
+    review_row = get_user_review_task(
+        db,
+        project_id=project_id,
+        review_id=review_id,
+        user_id=current_user.id,
+        statuses={REVIEW_STATUS_IN_PROGRESS},
+    )
+    if review_row is None:
+        raise HTTPException(status_code=404, detail="璐ㄦ浠诲姟涓嶅瓨鍦?")
+
+    review, task = review_row
     data = _build_review_task_detail(db, project_id, review, task)
     return build_response(data=serialize_schema(data))
 

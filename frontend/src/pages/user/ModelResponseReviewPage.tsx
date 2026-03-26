@@ -22,8 +22,9 @@ import {
   fetchModelResponseReviewMySubmissionDetail,
   fetchModelResponseReviewRubric,
   fetchModelResponseReviewSchema,
+  fetchModelResponseReviewTask,
   generateModelResponseReviewTaskResponse,
-  releaseMyProjectAnnotationTask,
+  releaseMyProjectAnnotationTaskByTaskId,
   submitModelResponseReviewSubmission,
   validateModelResponseReviewSubmission,
 } from "../../services/api";
@@ -112,8 +113,9 @@ const DEFAULT_MRR_RUBRIC: ModelResponseReviewRubric = {
 
 export function ModelResponseReviewPage() {
   const navigate = useNavigate();
-  const { projectId } = useParams<{ projectId: string }>();
+  const { projectId, taskId } = useParams<{ projectId: string; taskId?: string }>();
   const projectIdNumber = useMemo(() => Number(projectId), [projectId]);
+  const taskIdValue = useMemo(() => taskId || "", [taskId]);
   const [form] = Form.useForm<ReviewFormValues>();
   const [schema, setSchema] = useState<ModelResponseReviewSchema>(DEFAULT_MRR_SCHEMA);
   const [rubric, setRubric] = useState<ModelResponseReviewRubric>(DEFAULT_MRR_RUBRIC);
@@ -142,7 +144,9 @@ export function ModelResponseReviewPage() {
     setLoadError(null);
     try {
       const [taskData, schemaData, rubricData] = await Promise.all([
-        fetchModelResponseReviewCurrentTask(projectIdNumber),
+        taskIdValue
+          ? fetchModelResponseReviewTask(projectIdNumber, taskIdValue)
+          : fetchModelResponseReviewCurrentTask(projectIdNumber),
         fetchModelResponseReviewSchema().catch(() => DEFAULT_MRR_SCHEMA),
         fetchModelResponseReviewRubric().catch(() => DEFAULT_MRR_RUBRIC),
       ]);
@@ -198,7 +202,7 @@ export function ModelResponseReviewPage() {
     return () => {
       requestIdRef.current += 1;
     };
-  }, [projectIdNumber]);
+  }, [projectIdNumber, taskIdValue]);
 
   const handleGenerateResponse = async (force = false) => {
     if (!currentTask || Number.isNaN(projectIdNumber) || projectIdNumber <= 0) {
@@ -220,14 +224,15 @@ export function ModelResponseReviewPage() {
   };
 
   const handleRelease = async () => {
-    if (Number.isNaN(projectIdNumber) || projectIdNumber <= 0) {
+    if (!currentTask || Number.isNaN(projectIdNumber) || projectIdNumber <= 0) {
       message.error("项目参数不正确");
       return;
     }
 
     setReleasing(true);
     try {
-      await releaseMyProjectAnnotationTask(projectIdNumber);
+      const task = currentTask;
+      await releaseMyProjectAnnotationTaskByTaskId(projectIdNumber, task.task_id);
       message.success("已放弃当前任务，题目已回到任务池");
       navigate("/user/annotation-tasks", { replace: true });
     } catch (error) {

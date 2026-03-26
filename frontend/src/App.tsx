@@ -90,7 +90,12 @@ export default function App() {
             </Route>
 
             <Route path="/user/projects/:projectId/review" element={<ProjectReviewPage />} />
+            <Route path="/user/projects/:projectId/review/:reviewId" element={<ProjectReviewPage />} />
             <Route path="/user/projects/:projectId/model-response-review" element={<ModelResponseReviewPage />} />
+            <Route
+              path="/user/projects/:projectId/model-response-review/tasks/:taskId"
+              element={<ModelResponseReviewPage />}
+            />
             <Route
               path="/user/projects/:projectId/model-response-review/submissions/:taskId"
               element={<ModelResponseReviewSubmissionDetailPage />}
@@ -101,6 +106,10 @@ export default function App() {
             />
 
             <Route path="/user/projects/:projectId/single-turn-search-case" element={<SingleTurnSearchCasePage />} />
+            <Route
+              path="/user/projects/:projectId/single-turn-search-case/tasks/:taskId"
+              element={<SingleTurnSearchCasePage />}
+            />
             <Route
               path="/user/projects/:projectId/single-turn-search-case/submissions/:taskId"
               element={<SingleTurnSearchCaseSubmissionDetailPage />}

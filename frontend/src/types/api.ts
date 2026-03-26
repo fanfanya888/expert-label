@@ -142,6 +142,33 @@ export interface TaskHallListResult {
   items: TaskHallProjectItem[];
 }
 
+export interface MyAnnotationTaskQueueItem {
+  project: ProjectItem;
+  task: AdminProjectTaskItem;
+  current_user_annotation_limit: number;
+  current_user_annotation_owned_count: number;
+  trial_passed: boolean;
+}
+
+export interface MyAnnotationTaskQueueListResult {
+  total: number;
+  items: MyAnnotationTaskQueueItem[];
+}
+
+export interface MyReviewTaskQueueItem {
+  project: ProjectItem;
+  task: AdminProjectTaskItem;
+  review: ProjectTaskReviewItem;
+  current_user_review_limit: number;
+  current_user_total_review_owned_count: number;
+  current_user_review_owned_count: number;
+}
+
+export interface MyReviewTaskQueueListResult {
+  total: number;
+  items: MyReviewTaskQueueItem[];
+}
+
 export interface UserSubmissionRecordItem {
   submission_type: "annotation" | "review";
   plugin_code: string;

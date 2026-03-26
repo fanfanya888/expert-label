@@ -36,7 +36,8 @@ import {
   fetchSingleTurnSearchCaseCurrentTask,
   fetchSingleTurnSearchCaseMySubmissionDetail,
   fetchSingleTurnSearchCaseSchema,
-  releaseMyProjectAnnotationTask,
+  fetchSingleTurnSearchCaseTask,
+  releaseMyProjectAnnotationTaskByTaskId,
   reviewSingleTurnSearchCaseModelAWithAi,
   reviewSingleTurnSearchCaseModelBWithAi,
   reviewSingleTurnSearchCaseRuleDefinitionWithAi,
@@ -704,8 +705,9 @@ function renderModelCheckResult(
 
 export function SingleTurnSearchCasePage() {
   const navigate = useNavigate();
-  const { projectId } = useParams<{ projectId: string }>();
+  const { projectId, taskId } = useParams<{ projectId: string; taskId?: string }>();
   const projectIdNumber = useMemo(() => Number(projectId), [projectId]);
+  const taskIdValue = useMemo(() => taskId || "", [taskId]);
   const [form] = Form.useForm<SearchCaseFormValues>();
   const [schema, setSchema] = useState<SingleTurnSearchCaseSchema | null>(null);
   const stats = { completed_tasks: 0, total_tasks: 0 };
@@ -753,7 +755,9 @@ export function SingleTurnSearchCasePage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const taskData = await fetchSingleTurnSearchCaseCurrentTask(projectIdNumber);
+      const taskData = taskIdValue
+        ? await fetchSingleTurnSearchCaseTask(projectIdNumber, taskIdValue)
+        : await fetchSingleTurnSearchCaseCurrentTask(projectIdNumber);
       if (requestId !== requestIdRef.current) {
         return;
       }
@@ -819,7 +823,7 @@ export function SingleTurnSearchCasePage() {
     return () => {
       requestIdRef.current += 1;
     };
-  }, [projectIdNumber]);
+  }, [projectIdNumber, taskIdValue]);
 
   const handleRuleDefinitionReview = async (ruleIndex: number) => {
     if (!currentTask || Number.isNaN(projectIdNumber) || projectIdNumber <= 0) {
@@ -986,14 +990,15 @@ export function SingleTurnSearchCasePage() {
   };
 
   const handleRelease = async () => {
-    if (Number.isNaN(projectIdNumber) || projectIdNumber <= 0) {
+    if (!currentTask || Number.isNaN(projectIdNumber) || projectIdNumber <= 0) {
       message.error("项目参数不正确");
       return;
     }
 
     setReleasing(true);
     try {
-      await releaseMyProjectAnnotationTask(projectIdNumber);
+      const task = currentTask;
+      await releaseMyProjectAnnotationTaskByTaskId(projectIdNumber, task.task_id);
       message.success("已放弃当前任务，题目已回到任务池");
       navigate("/user/annotation-tasks", { replace: true });
     } catch (error) {

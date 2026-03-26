@@ -48,6 +48,18 @@ class SingleTurnSearchCasePlugin(AnnotationPlugin):
             return None
         return task.model_dump(mode="json")
 
+    def get_project_task(
+        self,
+        db: Session,
+        project_id: int,
+        task_id: str,
+        user_id: int,
+    ) -> dict[str, Any] | None:
+        task = self.service.get_task(db, project_id, task_id, user_id)
+        if task is None:
+            return None
+        return task.model_dump(mode="json")
+
     def get_project_stats(self, db: Session, project_id: int) -> dict[str, Any]:
         return self.service.build_project_stats(db, project_id).model_dump(mode="json")
 
