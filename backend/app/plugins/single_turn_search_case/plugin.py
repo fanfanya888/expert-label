@@ -132,6 +132,22 @@ class SingleTurnSearchCasePlugin(AnnotationPlugin):
             return None
         return detail.model_dump(mode="json")
 
+    def get_admin_submission_detail(
+        self,
+        db: Session,
+        project_id: int,
+        submission_id: int,
+    ) -> dict[str, Any] | None:
+        detail = self.service.get_submission_detail(
+            db,
+            project_id,
+            submission_id,
+            require_published=False,
+        )
+        if detail is None:
+            return None
+        return detail.model_dump(mode="json")
+
     def get_my_task_submission_detail(
         self,
         db: Session,

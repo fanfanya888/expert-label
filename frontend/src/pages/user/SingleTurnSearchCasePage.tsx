@@ -33,6 +33,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import {
+  fetchMyProjectDetail,
   fetchSingleTurnSearchCaseCurrentTask,
   fetchSingleTurnSearchCaseMySubmissionDetail,
   fetchSingleTurnSearchCaseSchema,
@@ -67,6 +68,7 @@ import {
   buildSingleTurnSearchCaseCommentMap,
   SingleTurnSearchCaseCommentDrawer,
 } from "./singleTurnSearchCaseReviewWorkspace";
+import { ProjectInstructionDrawer } from "../../components/ProjectInstructionMarkdown";
 
 interface SearchCaseRuleFormItem {
   rule_category: string;
@@ -716,6 +718,8 @@ export function SingleTurnSearchCasePage() {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [releasing, setReleasing] = useState(false);
+  const [instructionMarkdown, setInstructionMarkdown] = useState("");
+  const [instructionOpen, setInstructionOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ruleDefinitionReviews, setRuleDefinitionReviews] = useState<Record<number, AiReviewState<SingleTurnSearchCaseAiRuleCheckResponse>>>({});
@@ -737,6 +741,8 @@ export function SingleTurnSearchCasePage() {
     setSchema(DEFAULT_SEARCH_CASE_SCHEMA);
     setCurrentTask(null);
     setLatestSubmission(null);
+    setInstructionMarkdown("");
+    setInstructionOpen(false);
     setCommentsOpen(false);
     setLoadError(null);
     setRuleDefinitionReviews({});
@@ -755,9 +761,12 @@ export function SingleTurnSearchCasePage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const taskData = taskIdValue
-        ? await fetchSingleTurnSearchCaseTask(projectIdNumber, taskIdValue)
-        : await fetchSingleTurnSearchCaseCurrentTask(projectIdNumber);
+      const [taskData, projectDetail] = await Promise.all([
+        taskIdValue
+          ? fetchSingleTurnSearchCaseTask(projectIdNumber, taskIdValue)
+          : fetchSingleTurnSearchCaseCurrentTask(projectIdNumber),
+        fetchMyProjectDetail(projectIdNumber),
+      ]);
       if (requestId !== requestIdRef.current) {
         return;
       }
@@ -771,6 +780,8 @@ export function SingleTurnSearchCasePage() {
 
       setCurrentTask(taskData);
       setLatestSubmission(submissionDetail);
+      setInstructionMarkdown(projectDetail.instruction_markdown || "");
+      setInstructionOpen(false);
       setCommentsOpen(false);
 
       if (taskData) {
@@ -1105,7 +1116,8 @@ export function SingleTurnSearchCasePage() {
   return (
     <Spin spinning={loading}>
       <div className="search-case-page">
-        <Space direction="vertical" size={20} style={{ width: "100%" }}>
+        <div className="search-case-page__content">
+          <Space direction="vertical" size={20} style={{ width: "100%" }}>
           {loadError ? <Alert type="warning" showIcon message="加载任务失败" description={loadError} /> : null}
 
           <Card
@@ -1162,6 +1174,14 @@ export function SingleTurnSearchCasePage() {
               <Empty description="当前项目暂无待处理模板" />
             )}
           </Card>
+
+          <ProjectInstructionDrawer
+            title="任务说明"
+            open={instructionOpen}
+            markdown={instructionMarkdown}
+            visible={Boolean(instructionMarkdown.trim())}
+            onToggle={() => setInstructionOpen((value) => !value)}
+          />
 
           {hasModuleComments ? (
             <SingleTurnSearchCaseCommentDrawer
@@ -1661,7 +1681,8 @@ export function SingleTurnSearchCasePage() {
               </Space>
             </Form>
           )}
-        </Space>
+          </Space>
+        </div>
       </div>
     </Spin>
   );

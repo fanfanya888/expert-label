@@ -11,6 +11,7 @@
 ### 文档
 
 - `README.md` 已补“新增插件模块规范”，后续新增项目模块时先按这份清单落地，再写代码。
+- 当前已补“项目级说明文档”能力：管理员在具体项目 `任务管理` 页编辑 Markdown，用户标注页左侧抽屉展示说明文档并按标题自动生成目录。
 
 ### 认证与账号
 
@@ -67,7 +68,12 @@
     - `/user/projects/:projectId/review/:reviewId`
 - 标注页放弃任务已改成按具体 `task_id` 释放，不再按项目释放，避免多条进行中任务时误释放别的单子。
 - 任务大厅里的质检领取已允许继续领取同项目的下一条质检任务，只受总持有上限约束，不再因为“该项目已有我领取的质检单”而直接跳转列表。
-- `model_response_review` 和 `single_turn_search_case` 仍然使用统一工作台形态。
+- `model_response_review` 和 `single_turn_search_case` 标注页已接入左侧 `说明文档` 抽屉：
+  - 数据来源是项目级 `instruction_markdown`
+  - 目录按 Markdown 的 `# / ## / ###` 自动生成
+  - 当前支持标题、段落、列表、引用、代码块、链接和图片
+  - 图片当前支持普通 URL，也支持管理员插入的内联 `data:` 图片
+  - 桌面端说明抽屉当前使用更宽的浮层布局，顶部说明 + 左侧目录 + 右侧正文；中间作业区只做轻微居中收窄，不跟随抽屉开合位移
 
 ### 管理端
 
@@ -79,6 +85,15 @@
   - 导出接口：`/api/admin/projects/{project_id}/tasks/export?format=json`
   - 当前只导出该项目 `approved` 任务的最终通过结果
   - 不包含批注、质检历史和历史提交列表
+- 具体项目的 `任务管理` 页新增 `说明文档` 配置入口：
+  - 管理员编辑项目级 Markdown 说明文档
+  - 支持实时预览
+  - 支持按标题自动生成目录预览
+  - 支持插入标题和图片
+  - 图片当前以前端转 `data:` URL 后插入 Markdown 的最小方案实现
+- 管理端 `single_turn_search_case` 任务的质检“查看详情”白屏已修复：
+  - 后端插件现在会给管理端返回完整 submission detail，而不是只有 summary
+  - 前端详情抽屉增加了不完整快照兜底，避免再次直接白屏
 
 ## 新增接口与路由
 
@@ -88,9 +103,12 @@
 - 用户端按具体单子打开：
   - `GET /api/me/projects/{project_id}/review-task/{review_id}`
   - `POST /api/me/projects/{project_id}/annotation-task/{task_id}/release`
+  - `GET /api/me/projects/{project_id}`：当前会返回项目级 `instruction_markdown`
 - 插件按具体标注任务加载：
   - `GET /api/plugins/model_response_review/projects/{project_id}/tasks/{task_id}`
   - `GET /api/plugins/single_turn_search_case/projects/{project_id}/tasks/{task_id}`
+- 管理端项目说明文档：
+  - `PATCH /api/admin/projects/{project_id}`：更新项目级 `instruction_markdown`
 
 ## 数据库与迁移
 
@@ -98,8 +116,9 @@
   - `backend/alembic/versions/20260324_0009_add_auth_and_simplify_roles.py`
   - `backend/alembic/versions/20260324_0010_add_task_workflow_and_user_capabilities.py`
   - `backend/alembic/versions/20260325_0011_add_review_annotations.py`
+  - `backend/alembic/versions/20260326_0012_add_project_instruction_markdown.py`
 - 当前数据库版本应为：
-  - `20260325_0011 (head)`
+  - `20260326_0012 (head)`
 
 ## 关键文件
 
@@ -112,13 +131,18 @@
   - `frontend/src/pages/user/ModelResponseReviewPage.tsx`
   - `frontend/src/pages/user/SingleTurnSearchCasePage.tsx`
   - `frontend/src/pages/user/ProjectReviewPage.tsx`
+  - `frontend/src/components/ProjectInstructionMarkdown.tsx`
   - `frontend/src/services/api.ts`
   - `frontend/src/types/api.ts`
-- 后端任务/质检查询与接口：
+- 后端项目/任务/说明文档接口：
+  - `backend/app/api/routes/admin_projects.py`
   - `backend/app/api/routes/me_projects.py`
+  - `backend/app/api/routes/admin_project_tasks.py`
+  - `backend/app/crud/projects.py`
   - `backend/app/crud/project_tasks.py`
   - `backend/app/crud/project_task_reviews.py`
-  - `backend/app/schemas/project_task.py`
+  - `backend/app/models/project.py`
+  - `backend/app/schemas/project.py`
 - 插件具体任务加载：
   - `backend/app/plugins/model_response_review/router.py`
   - `backend/app/plugins/model_response_review/plugin.py`
@@ -126,13 +150,12 @@
   - `backend/app/plugins/single_turn_search_case/router.py`
   - `backend/app/plugins/single_turn_search_case/plugin.py`
   - `backend/app/plugins/single_turn_search_case/service.py`
-- 管理端导出：
-  - `backend/app/api/routes/admin_project_tasks.py`
+- 管理端页面：
   - `frontend/src/pages/admin/ProjectTasksPage.tsx`
 
 ## 已验证
 
-- `python -m py_compile backend/app/api/routes/me_projects.py backend/app/crud/project_tasks.py backend/app/crud/project_task_reviews.py backend/app/schemas/project_task.py backend/app/plugins/model_response_review/router.py backend/app/plugins/model_response_review/plugin.py backend/app/plugins/model_response_review/service.py backend/app/plugins/single_turn_search_case/router.py backend/app/plugins/single_turn_search_case/plugin.py backend/app/plugins/single_turn_search_case/service.py`
+- `python -m py_compile backend/app/models/project.py backend/app/schemas/project.py backend/app/crud/projects.py backend/app/api/routes/admin_projects.py backend/app/api/routes/me_projects.py backend/alembic/versions/20260326_0012_add_project_instruction_markdown.py`
 - `cd frontend && npm run build`
 
 ## 当前边界
@@ -141,15 +164,18 @@
 - 任务大厅仍按项目展示，不改成任务级大厅。
 - 当前任务级入口已覆盖 `model_response_review` 和 `single_turn_search_case` 两个正式用户工作页。
 - 管理端导出当前仍只支持具体项目任务页的 JSON 导出。
+- 项目说明文档当前是项目级 Markdown 字段，不做独立文档系统，也不做 PDF 主展示。
 
 ## 后续可继续做
 
-- 如果后续还有其他插件接入用户端工作页，需要补对应的“按具体 task 打开”路由和接口，不要再走按项目取当前任务的老方式。
+- 如果后续还有其他插件接入用户端工作页，需要补对应的“按具体 task 打开”路由和接口，不要再走按项目取当前任务的旧方式。
+- 如果说明文档后续图片很多，建议补真实文件上传与存储，不要长期依赖内联 `data:` 图片。
 - 如果任务大厅后续也要更细，可以继续把大厅从项目视角改成任务视角，但当前不是必须。
 - 如果导出字段还嫌多，可以继续按插件裁剪最终结果字段。
 
 ## 当前风险
 
 - `ProjectWorkspacePage.tsx` 仍是通用兜底页，还是按项目入口，不适合未来新增需要多任务并行的插件；当前正式使用的两个插件已绕开这个问题。
-- 如果本地数据库未升级到 `20260325_0011`，`review_annotations` 相关能力不会正常。
+- 如果本地数据库未升级到 `20260326_0012`，项目说明文档能力不会正常。
+- 项目说明文档图片当前使用内联 `data:` URL，文档很长或图片很多时会让单条字段变重。
 - 当前最终放行仍依赖管理员在 `review_submitted` 后手动 `approve`，不是“质检通过即自动 approved”。

@@ -37,6 +37,7 @@ class Project(TimestampMixin, Base):
         server_default=sa.text("'unknown'"),
     )
     external_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    instruction_markdown: Mapped[str | None] = mapped_column(Text(), nullable=True)
     is_published: Mapped[bool] = mapped_column(
         Boolean,
         index=True,

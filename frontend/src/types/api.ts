@@ -113,6 +113,10 @@ export interface ProjectItem {
   owner: UserSummary | null;
 }
 
+export interface ProjectDetailItem extends ProjectItem {
+  instruction_markdown: string | null;
+}
+
 export interface ProjectListResult {
   total: number;
   items: ProjectItem[];

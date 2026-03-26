@@ -5,6 +5,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
   StopOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 import {
   Alert,
@@ -25,8 +26,10 @@ import {
   Table,
   Tag,
   Typography,
+  Upload,
   message,
 } from "antd";
+import type { TextAreaRef } from "antd/es/input/TextArea";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -44,18 +47,24 @@ import {
   fetchSingleTurnSearchCaseSchema,
   publishAdminProjectTask,
   unpublishAdminProjectTask,
+  updateAdminProjectInstruction,
 } from "../../services/api";
 import type {
   AdminProjectTaskCreatePayload,
   AdminProjectTaskItem,
   ModelResponseReviewSchema,
   ModelResponseReviewTaskTemplatePayload,
-  ProjectItem,
+  ProjectDetailItem,
   ProjectTaskReviewItem,
   ProjectTaskReviewTaskDetail,
   SingleTurnSearchCaseSchema,
   SingleTurnSearchCaseTaskTemplatePayload,
 } from "../../types/api";
+import {
+  MarkdownDocumentPreview,
+  MarkdownOutline,
+  useParsedMarkdownDocument,
+} from "../../components/ProjectInstructionMarkdown";
 import { AdminProjectTaskReviewDetailDrawer } from "./AdminProjectTaskReviewDetailDrawer";
 
 interface ModelResponseReviewTaskFormValues {
@@ -116,6 +125,39 @@ function triggerFileDownload(blob: Blob, filename: string) {
   link.click();
   link.remove();
   window.setTimeout(() => window.URL.revokeObjectURL(downloadUrl), 0);
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function insertTextAtCursor(
+  currentValue: string,
+  insertText: string,
+  textarea: HTMLTextAreaElement | null | undefined,
+) {
+  if (!textarea) {
+    return {
+      value: `${currentValue}${currentValue.endsWith("\n") || !currentValue ? "" : "\n"}${insertText}`,
+      selectionStart: null,
+      selectionEnd: null,
+    };
+  }
+
+  const start = textarea.selectionStart ?? currentValue.length;
+  const end = textarea.selectionEnd ?? currentValue.length;
+  const nextValue = `${currentValue.slice(0, start)}${insertText}${currentValue.slice(end)}`;
+  const nextCursor = start + insertText.length;
+  return {
+    value: nextValue,
+    selectionStart: nextCursor,
+    selectionEnd: nextCursor,
+  };
 }
 
 function getPublishMeta(status: string) {
@@ -201,7 +243,7 @@ export function ProjectTasksPage() {
   const projectIdNumber = useMemo(() => Number(projectId), [projectId]);
   const [modelResponseForm] = Form.useForm<ModelResponseReviewTaskFormValues>();
   const [searchCaseForm] = Form.useForm<SearchCaseTaskFormValues>();
-  const [project, setProject] = useState<ProjectItem | null>(null);
+  const [project, setProject] = useState<ProjectDetailItem | null>(null);
   const [mrrSchema, setMrrSchema] = useState<ModelResponseReviewSchema | null>(null);
   const [searchCaseSchema, setSearchCaseSchema] = useState<SingleTurnSearchCaseSchema | null>(null);
   const [items, setItems] = useState<AdminProjectTaskItem[]>([]);
@@ -213,6 +255,9 @@ export function ProjectTasksPage() {
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("json");
   const [exporting, setExporting] = useState(false);
+  const [instructionDrawerOpen, setInstructionDrawerOpen] = useState(false);
+  const [instructionDraft, setInstructionDraft] = useState("");
+  const [instructionSaving, setInstructionSaving] = useState(false);
   const [reviewDrawerOpen, setReviewDrawerOpen] = useState(false);
   const [reviewDrawerTask, setReviewDrawerTask] = useState<AdminProjectTaskItem | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -221,10 +266,13 @@ export function ProjectTasksPage() {
   const [reviewDetailLoading, setReviewDetailLoading] = useState(false);
   const [reviewDetail, setReviewDetail] = useState<ProjectTaskReviewTaskDetail | null>(null);
   const requestIdRef = useRef(0);
+  const instructionTextareaRef = useRef<TextAreaRef>(null);
+  const instructionPreviewRef = useRef<HTMLDivElement>(null);
 
   const isModelResponseReview = project?.plugin_code === "model_response_review";
   const isSearchCase = project?.plugin_code === "single_turn_search_case";
   const isSupportedProject = isModelResponseReview || isSearchCase;
+  const parsedInstruction = useParsedMarkdownDocument(instructionDraft);
   const isCompactTaskTable = isModelResponseReview || isSearchCase;
   const tableItems = useMemo(
     () => (isCompactTaskTable ? [...items].sort((left, right) => left.id - right.id) : items),
@@ -253,6 +301,9 @@ export function ProjectTasksPage() {
     setLoadError(null);
     setExportModalOpen(false);
     setExporting(false);
+    setInstructionDrawerOpen(false);
+    setInstructionDraft("");
+    setInstructionSaving(false);
     setReviewDrawerTask(null);
     setReviewItems([]);
     setReviewDrawerOpen(false);
@@ -311,6 +362,63 @@ export function ProjectTasksPage() {
     } finally {
       setExporting(false);
     }
+  };
+
+  const openInstructionDrawer = () => {
+    setInstructionDraft(project?.instruction_markdown || "");
+    setInstructionDrawerOpen(true);
+  };
+
+  const handleSaveInstruction = async () => {
+    if (!project) {
+      return;
+    }
+
+    setInstructionSaving(true);
+    try {
+      const updatedProject = await updateAdminProjectInstruction(
+        project.id,
+        instructionDraft.trim() ? instructionDraft : null,
+      );
+      setProject(updatedProject);
+      setInstructionDraft(updatedProject.instruction_markdown || "");
+      message.success("说明文档已保存");
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "保存说明文档失败";
+      message.error(errorMessage);
+    } finally {
+      setInstructionSaving(false);
+    }
+  };
+
+  const handleInsertInstructionImage = async (file: File) => {
+    try {
+      const base64 = await fileToBase64(file);
+      const fileName = file.name.replace(/\s+/g, "-") || "image";
+      const markdownImage = `\n![${fileName}](${base64})\n`;
+      const textarea = instructionTextareaRef.current?.resizableTextArea?.textArea;
+      const inserted = insertTextAtCursor(instructionDraft, markdownImage, textarea);
+      setInstructionDraft(inserted.value);
+      window.requestAnimationFrame(() => {
+        const nextTextarea = instructionTextareaRef.current?.resizableTextArea?.textArea;
+        if (
+          nextTextarea &&
+          inserted.selectionStart !== null &&
+          inserted.selectionEnd !== null
+        ) {
+          nextTextarea.focus();
+          nextTextarea.setSelectionRange(inserted.selectionStart, inserted.selectionEnd);
+        }
+      });
+      message.success("图片 Markdown 已插入");
+    } catch {
+      message.error("图片读取失败，请重试");
+    }
+  };
+
+  const handleInstructionPreviewNavigate = (headingId: string) => {
+    const target = instructionPreviewRef.current?.querySelector<HTMLElement>(`#${headingId}`);
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   useEffect(() => {
@@ -623,6 +731,7 @@ export function ProjectTasksPage() {
         extra={
           <Space>
             <Button icon={<ReloadOutlined />} onClick={() => void loadPageData()} loading={loading}>刷新</Button>
+            <Button onClick={openInstructionDrawer} disabled={!project || loading}>说明文档</Button>
             <Button icon={<DownloadOutlined />} onClick={() => setExportModalOpen(true)} disabled={!project || loading}>
               数据导出
             </Button>
@@ -658,6 +767,86 @@ export function ProjectTasksPage() {
           columns={columns}
         />
       </Card>
+
+      <Drawer
+        title="说明文档"
+        width={1100}
+        open={instructionDrawerOpen}
+        destroyOnHidden={false}
+        onClose={() => {
+          setInstructionDrawerOpen(false);
+          setInstructionDraft(project?.instruction_markdown || "");
+        }}
+        extra={
+          <Space>
+            <Button
+              onClick={() => {
+                setInstructionDraft(project?.instruction_markdown || "");
+              }}
+            >
+              重置
+            </Button>
+            <Button type="primary" loading={instructionSaving} onClick={() => void handleSaveInstruction()}>
+              保存
+            </Button>
+          </Space>
+        }
+      >
+        <Row gutter={[20, 20]}>
+          <Col xs={24} xl={12}>
+            <div className="project-instruction-editor">
+              <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+                管理员直接编辑 Markdown。目录导航会根据标题自动生成，图片会以内嵌 Markdown 图片语法插入。
+              </Typography.Paragraph>
+              <Space wrap>
+                <Upload
+                  accept="image/*"
+                  showUploadList={false}
+                  beforeUpload={async (file) => {
+                    await handleInsertInstructionImage(file);
+                    return false;
+                  }}
+                >
+                  <Button icon={<UploadOutlined />}>上传图片并插入 Markdown</Button>
+                </Upload>
+                <Button
+                  onClick={() => {
+                    const textarea = instructionTextareaRef.current?.resizableTextArea?.textArea;
+                    const inserted = insertTextAtCursor(instructionDraft, "\n## 新章节\n\n", textarea);
+                    setInstructionDraft(inserted.value);
+                  }}
+                >
+                  插入标题
+                </Button>
+              </Space>
+              <Input.TextArea
+                ref={instructionTextareaRef}
+                value={instructionDraft}
+                className="project-instruction-editor__textarea"
+                placeholder={"# 标注说明\n\n## 任务目标\n\n## 标注规则\n\n## 易错点\n\n## 示例"}
+                onChange={(event) => setInstructionDraft(event.target.value)}
+              />
+            </div>
+          </Col>
+          <Col xs={24} xl={12}>
+            <div className="project-instruction-preview">
+              <div className="project-instruction-preview__panel">
+                <Typography.Text strong>目录导航</Typography.Text>
+                <MarkdownOutline
+                  headings={parsedInstruction.headings}
+                  onNavigate={handleInstructionPreviewNavigate}
+                />
+              </div>
+              <div ref={instructionPreviewRef} className="project-instruction-preview__panel">
+                <Typography.Text strong>实时预览</Typography.Text>
+                <div style={{ marginTop: 16 }}>
+                  <MarkdownDocumentPreview markdown={instructionDraft} emptyDescription="暂无说明文档内容" />
+                </div>
+              </div>
+            </div>
+          </Col>
+        </Row>
+      </Drawer>
 
       <Modal
         title="导出当前项目数据"

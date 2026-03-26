@@ -41,7 +41,7 @@ from app.models.project_task_review import ProjectTaskReview
 from app.models.single_turn_search_case_record import SingleTurnSearchCaseRecord
 from app.models.user import User
 from app.plugins.registrar import get_plugin_registry
-from app.schemas.project import ProjectHallList, ProjectHallRead, ProjectList, ProjectRead
+from app.schemas.project import ProjectDetailRead, ProjectHallList, ProjectHallRead, ProjectList, ProjectRead
 from app.schemas.project_task import (
     MyAnnotationTaskQueueItem,
     MyAnnotationTaskQueueList,
@@ -828,5 +828,7 @@ def get_my_project_detail(
         raise HTTPException(status_code=404, detail="项目不存在")
 
     stats_map = get_project_task_stats_map(db, [project.id], visible_only=True)
-    data = ProjectRead.model_validate(build_project_payload(project, stats_map.get(project.id)))
+    data = ProjectDetailRead.model_validate(
+        build_project_payload(project, stats_map.get(project.id), include_instruction=True)
+    )
     return build_response(data=serialize_schema(data))

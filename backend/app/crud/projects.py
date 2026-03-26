@@ -93,6 +93,18 @@ def unpublish_project(db: Session, project: Project) -> Project:
     return get_project_by_id(db, project.id) or project
 
 
+def update_project_instruction(
+    db: Session,
+    project: Project,
+    instruction_markdown: str | None,
+) -> Project:
+    project.instruction_markdown = instruction_markdown
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    return get_project_by_id(db, project.id) or project
+
+
 def get_project_task_stats_map(
     db: Session,
     project_ids: list[int],
@@ -136,13 +148,15 @@ def get_project_task_stats_map(
 def build_project_payload(
     project: Project,
     stats: dict[str, int] | None = None,
+    *,
+    include_instruction: bool = False,
 ) -> dict[str, Any]:
     project_stats = stats or {
         "task_total": 0,
         "task_completed": 0,
         "task_pending": 0,
     }
-    return {
+    payload = {
         "id": project.id,
         "name": project.name,
         "description": project.description,
@@ -163,3 +177,6 @@ def build_project_payload(
         "task_pending": project_stats["task_pending"],
         "owner": project.owner,
     }
+    if include_instruction:
+        payload["instruction_markdown"] = project.instruction_markdown
+    return payload

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from pydantic import BaseModel
+
 from app.schemas.common import ListResult, ORMModel
 from app.schemas.user import UserRead
 
@@ -26,6 +28,10 @@ class ProjectRead(ORMModel):
     task_completed: int = 0
     task_pending: int = 0
     owner: UserRead | None = None
+
+
+class ProjectDetailRead(ProjectRead):
+    instruction_markdown: str | None = None
 
 
 class ProjectList(ListResult):
@@ -53,3 +59,7 @@ class ProjectHallRead(ProjectRead):
 
 class ProjectHallList(ListResult):
     items: list[ProjectHallRead]
+
+
+class ProjectInstructionUpdate(BaseModel):
+    instruction_markdown: str | None = None

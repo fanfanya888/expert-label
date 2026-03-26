@@ -80,6 +80,23 @@ function findSearchCaseEvaluation(
   return evaluations.find((item) => item.rule_index === ruleIndex) || null;
 }
 
+function isSingleTurnSearchCaseSubmissionDetail(
+  value: unknown,
+): value is SingleTurnSearchCaseSubmissionDetail {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  return (
+    "model_a" in value &&
+    "model_b" in value &&
+    "scoring_rules" in value &&
+    "model_a_evaluations" in value &&
+    "model_b_evaluations" in value &&
+    "score_summary" in value
+  );
+}
+
 function SearchCaseModelCard({
   title,
   model,
@@ -318,9 +335,10 @@ export function AdminProjectTaskReviewDetailDrawer({
   const modelResponseSubmission = isModelResponseReview
     ? (detail?.submission as ModelResponseReviewSubmissionRecord | null)
     : null;
-  const searchCaseSubmission = isSearchCase
-    ? (detail?.submission as SingleTurnSearchCaseSubmissionDetail | null)
-    : null;
+  const searchCaseSubmission =
+    isSearchCase && isSingleTurnSearchCaseSubmissionDetail(detail?.submission)
+      ? detail.submission
+      : null;
 
   const submissionId = useMemo(() => {
     if (!detail?.submission || typeof detail.submission !== "object") {
@@ -504,6 +522,13 @@ export function AdminProjectTaskReviewDetailDrawer({
 
                   <SearchCaseScoreSummarySection detail={searchCaseSubmission} />
                 </>
+              ) : detail.submission ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="当前提交快照不完整"
+                  description="这条质检记录返回的是提交摘要而不是完整详情，已避免页面白屏；如果刷新后仍出现，说明后端还没加载到最新代码。"
+                />
               ) : (
                 <Alert type="warning" showIcon message="未拿到该轮对应的标注快照" />
               )

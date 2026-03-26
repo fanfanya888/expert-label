@@ -19,6 +19,7 @@ import type {
   MyAnnotationTaskQueueListResult,
   MyReviewTaskQueueListResult,
   PingInfo,
+  ProjectDetailItem,
   ProjectItem,
   ProjectListResult,
   ProjectTaskReviewItem,
@@ -224,7 +225,14 @@ export function fetchAdminProjects() {
 }
 
 export function fetchAdminProjectDetail(projectId: number) {
-  return request<ProjectItem>(`/api/admin/projects/${projectId}`);
+  return request<ProjectDetailItem>(`/api/admin/projects/${projectId}`);
+}
+
+export function updateAdminProjectInstruction(projectId: number, instruction_markdown: string | null) {
+  return request<ProjectDetailItem>(`/api/admin/projects/${projectId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ instruction_markdown }),
+  });
 }
 
 export function publishAdminProject(projectId: number) {
@@ -326,7 +334,7 @@ export function fetchMySubmissionRecords() {
 }
 
 export function fetchMyProjectDetail(projectId: number) {
-  return request<ProjectItem>(`/api/me/projects/${projectId}`);
+  return request<ProjectDetailItem>(`/api/me/projects/${projectId}`);
 }
 
 export async function claimMyProjectAnnotationTask(projectId: number) {

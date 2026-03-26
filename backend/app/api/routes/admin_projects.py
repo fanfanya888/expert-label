@@ -12,10 +12,11 @@ from app.crud.projects import (
     list_projects,
     publish_project,
     unpublish_project,
+    update_project_instruction,
 )
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.project import ProjectList, ProjectRead
+from app.schemas.project import ProjectDetailRead, ProjectInstructionUpdate, ProjectList, ProjectRead
 
 router = APIRouter(
     prefix="/admin/projects",
@@ -52,8 +53,32 @@ def get_admin_project_detail(
         raise HTTPException(status_code=404, detail="项目不存在")
 
     stats_map = get_project_task_stats_map(db, [project.id])
-    data = ProjectRead.model_validate(build_project_payload(project, stats_map.get(project.id)))
+    data = ProjectDetailRead.model_validate(
+        build_project_payload(project, stats_map.get(project.id), include_instruction=True)
+    )
     return build_response(data=serialize_schema(data))
+
+
+@router.patch("/{project_id}")
+def update_admin_project(
+    project_id: int,
+    payload: ProjectInstructionUpdate,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    project = get_project_by_id(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    normalized_instruction = payload.instruction_markdown
+    if normalized_instruction is not None and not normalized_instruction.strip():
+        normalized_instruction = None
+
+    updated_project = update_project_instruction(db, project, normalized_instruction)
+    stats_map = get_project_task_stats_map(db, [updated_project.id])
+    data = ProjectDetailRead.model_validate(
+        build_project_payload(updated_project, stats_map.get(updated_project.id), include_instruction=True)
+    )
+    return build_response(message="项目说明文档已更新", data=serialize_schema(data))
 
 
 @router.patch("/{project_id}/publish")

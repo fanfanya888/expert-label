@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import {
+  fetchMyProjectDetail,
   fetchModelResponseReviewCurrentTask,
   fetchModelResponseReviewMySubmissionDetail,
   fetchModelResponseReviewRubric,
@@ -41,6 +42,7 @@ import {
   ModelResponseReviewCommentDrawer,
   ModelResponseReviewSectionCard,
 } from "./modelResponseReviewWorkspace";
+import { ProjectInstructionDrawer } from "../../components/ProjectInstructionMarkdown";
 
 interface ReviewFormValues {
   task_category: string;
@@ -125,6 +127,8 @@ export function ModelResponseReviewPage() {
   const [submitting, setSubmitting] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [releasing, setReleasing] = useState(false);
+  const [instructionMarkdown, setInstructionMarkdown] = useState("");
+  const [instructionOpen, setInstructionOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
@@ -143,12 +147,13 @@ export function ModelResponseReviewPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [taskData, schemaData, rubricData] = await Promise.all([
+      const [taskData, schemaData, rubricData, projectDetail] = await Promise.all([
         taskIdValue
           ? fetchModelResponseReviewTask(projectIdNumber, taskIdValue)
           : fetchModelResponseReviewCurrentTask(projectIdNumber),
         fetchModelResponseReviewSchema().catch(() => DEFAULT_MRR_SCHEMA),
         fetchModelResponseReviewRubric().catch(() => DEFAULT_MRR_RUBRIC),
+        fetchMyProjectDetail(projectIdNumber),
       ]);
       if (requestId !== requestIdRef.current) {
         return;
@@ -165,6 +170,8 @@ export function ModelResponseReviewPage() {
       setLatestSubmission(submissionDetail);
       setSchema(schemaData);
       setRubric(rubricData);
+      setInstructionMarkdown(projectDetail.instruction_markdown || "");
+      setInstructionOpen(false);
       setCommentsOpen(false);
 
       if (taskData) {
@@ -298,8 +305,9 @@ export function ModelResponseReviewPage() {
 
   return (
     <Spin spinning={loading}>
-      <div className="review-page" style={{ padding: 24 }}>
-        <Space direction="vertical" size={20} style={{ width: "100%" }}>
+      <div className="review-page">
+        <div className="review-page__content">
+          <Space direction="vertical" size={20} style={{ width: "100%" }}>
           <Card className="review-card">
             <Space direction="vertical" size={12} style={{ width: "100%" }}>
               <Space wrap className="mrr-workspace__toolbar">
@@ -331,6 +339,14 @@ export function ModelResponseReviewPage() {
               </div>
             </Space>
           </Card>
+
+          <ProjectInstructionDrawer
+            title="任务说明"
+            open={instructionOpen}
+            markdown={instructionMarkdown}
+            visible={Boolean(instructionMarkdown.trim())}
+            onToggle={() => setInstructionOpen((value) => !value)}
+          />
 
           {hasModuleComments ? (
             <ModelResponseReviewCommentDrawer
@@ -461,7 +477,8 @@ export function ModelResponseReviewPage() {
               </Space>
             </Form>
           )}
-        </Space>
+          </Space>
+        </div>
       </div>
     </Spin>
   );
